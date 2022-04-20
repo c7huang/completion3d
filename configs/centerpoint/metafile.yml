@@ -1,0 +1,30 @@
+Collections:
+  - Name: CenterPoint
+    Metadata:
+      Training Data: nuScenes
+      Training Techniques:
+        - AdamW
+      Training Resources: 8x V100 GPUs
+      Architecture:
+        - Hard Voxelization
+    Paper:
+      URL: https://arxiv.org/abs/2006.11275
+      Title: 'Center-based 3D Object Detection and Tracking'
+    README: configs/centerpoint/README.md
+    Code:
+      URL: https://github.com/open-mmlab/mmdetection3d/blob/master/mmdet3d/models/detectors/centerpoint.py#L10
+      Version: v0.6.0
+
+Models:
+  - Name: centerpoint_0075voxel_second_secfpn_dcn_circlenms_4x8_cyclic_20e_nus
+    In Collection: CenterPoint
+    Config: configs/centerpoint/centerpoint_0075voxel_second_secfpn_dcn_circlenms_4x8_cyclic_20e_nus.py
+    Metadata:
+      Training Memory (GB): 8.5
+    Results:
+      - Task: 3D Object Detection
+        Dataset: nuScenes
+        Metrics:
+          mAP: 57.27
+          NDS: 65.58
+    Weights: https://download.openmmlab.com/mmdetection3d/v0.1.0_models/centerpoint/centerpoint_0075voxel_second_secfpn_dcn_circlenms_4x8_cyclic_20e_nus/centerpoint_0075voxel_second_secfpn_dcn_circlenms_4x8_cyclic_20e_nus_20200930_201619-67c8496f.pth
