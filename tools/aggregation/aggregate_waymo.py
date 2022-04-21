@@ -181,7 +181,7 @@ if __name__ == '__main__':
             infos = pickle.load(f)
     else:
         infos = get_waymo_infos( dataset_path )
-        with open(infos_file) as f:
+        with open(infos_file, 'wb') as f:
             pickle.dump(infos, f)
     
     dataset = dict(
