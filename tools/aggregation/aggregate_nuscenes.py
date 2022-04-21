@@ -95,7 +95,7 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
         ######################################################################## 
         # Extract and aggregate object point clouds
         ######################################################################## 
-        obj_mask, obj_points = extract_object_point_clouds(points, boxes, obj_points)
+        obj_mask, obj_points = extract_object_point_clouds(points, boxes, origin=(0.5, 0.5, 0.5), obj_points=obj_points)
 
         ######################################################################## 
         # Transform and aggregate background point clouds

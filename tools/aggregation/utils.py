@@ -6,7 +6,7 @@ def rot_matrix_2d( angle ):
     return np.array([[cos, -sin], [sin, cos]])
 
 
-def extract_object_point_clouds( points, boxes, obj_points=None ):
+def extract_object_point_clouds( points, boxes, origin=(0.5, 0.5, 0.), obj_points=None ):
     if obj_points is None:
         obj_points = {}
 
@@ -15,7 +15,7 @@ def extract_object_point_clouds( points, boxes, obj_points=None ):
 
     # Identify points in boxes
     # obj_mask: (# points, # boxes)
-    obj_mask = points_in_rbbox(points, np.stack(list(boxes.values())), origin=(0.5, 0.5, 0.5))
+    obj_mask = points_in_rbbox(points, np.stack(list(boxes.values())), origin=origin)
 
     for i, (id, box) in enumerate(boxes.items()):
 
