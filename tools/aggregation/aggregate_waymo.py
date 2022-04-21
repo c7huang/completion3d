@@ -136,11 +136,11 @@ def get_waymo_infos( dataset_path ):
     for prefix, split in enumerate(['training', 'validation']):
         tfrecords = sorted(glob(f'{dataset_path}/{split}/*.tfrecord'))
         for seq_idx, tfrecord in enumerate(tqdm(tfrecords, desc=f'{split} split')):
-            seq_idx += prefix*1e3
+            seq_idx = int(seq_idx + prefix * 1e3)
             num_frames = len(list(filter(lambda idx: idx//1e3 == seq_idx, infos.keys())))
             dataset = tf.data.TFRecordDataset(tfrecord, compression_type='')
             for frame_idx, data in enumerate(tqdm(dataset, total=num_frames, desc=f'Seq {seq_idx}', leave=False)):
-                frame_idx = seq_idx*1e3 + frame_idx
+                frame_idx = int(seq_idx*1e3 + frame_idx)
                 frame = dataset_pb2.Frame()
                 frame.ParseFromString(bytearray(data.numpy()))
                 info = infos[frame_idx]
@@ -175,9 +175,14 @@ if __name__ == '__main__':
     output_path = '../../data/waymo_agg'
     os.makedirs(output_path, exist_ok=True)
 
-    infos = get_waymo_infos( nusc )
-    with open(f'{output_path}/waymo_infos_trainval.pkl', 'wb') as f:
-        pickle.dump(infos, f)
+    infos_file = f'{output_path}/waymo_infos_trainval.pkl'
+    if os.path.isfile(infos_file):
+        with open(infos_file, 'rb') as f:
+            infos = pickle.load(f)
+    else:
+        infos = get_waymo_infos( dataset_path )
+        with open(infos_file) as f:
+            pickle.dump(infos, f)
     
     dataset = dict(
         dataset_path=dataset_path,
@@ -185,4 +190,4 @@ if __name__ == '__main__':
         infos=infos
     )
 
-    # aggregate_waymo( dataset, begin=scene_begin, end=scene_end, output_path=output_path )
+    aggregate_waymo( dataset, begin=scene_begin, end=scene_end, output_path=output_path )
