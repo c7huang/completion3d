@@ -173,7 +173,43 @@ def load_waymo_points_with_object_mask( dataset_path, info ):
 
 
 def load_waymo_aggregated_points( dataset_path, info ):
-    return np.zeros((0,6), dtype=np.float32), {}
+    frame_id = info['image']['image_idx']
+    seq_id = int(frame_id // 1000)
+
+    # Load scene point cloud
+    bg_points = load_points_from_file(f'{dataset_path}/sequences/{seq_id}.bin')
+
+    # Load object point clouds
+    obj_points = {}
+    for obj_id in info['annos']['obj_ids']:
+        obj_points[obj_id] = load_points_from_file(f'{dataset_path}/objects/{obj_id}.bin')
+
+    # Transform background points
+    bg_points[:,:3] = np.dot(
+        np.concatenate([bg_points[:,:3], np.ones((bg_points.shape[0], 1))], axis=1),
+        np.linalg.inv(info['pose']).T
+    )[:,:3]
+
+    # Transform object points
+    gt_boxes = convert_kitti_boxes(info['annos'], info['calib'])
+    for obj_id, box in zip( info['annos']['obj_ids'], gt_boxes ):
+        obj_points[obj_id][:,:2] = np.dot(obj_points[obj_id][:,:2], rot_matrix_2d(-box[6]).T)
+        obj_points[obj_id][:,:3] += box[:3]
+        obj_points[obj_id] = obj_points[obj_id][
+            (np.abs(obj_points[obj_id][:,0]) < 75) & 
+            (np.abs(obj_points[obj_id][:,1]) < 75) &
+            (obj_points[obj_id][:,2] > -2) &
+            (obj_points[obj_id][:,2] < 4)
+        ]
+
+    bg_points = bg_points[
+        (np.abs(bg_points[:,0]) < 75) & 
+        (np.abs(bg_points[:,1]) < 75) &
+        (bg_points[:,2] > -2) &
+        (bg_points[:,2] < 4)
+    ]
+
+    return bg_points, obj_points
 
 
 if __name__ == '__main__':
