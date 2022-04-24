@@ -10,11 +10,12 @@ from tqdm.autonotebook import tqdm
 from waymo_open_dataset import dataset_pb2
 from mmcv.fileio import FileClient
 from mmdet3d.core.bbox import (get_box_type, CameraInstance3DBoxes)
+from mmdet3d.core.bbox.box_np_ops import points_in_rbbox
 from mmdet3d.datasets.pipelines.loading import LoadPointsFromFile
 from utils import rot_matrix_2d, extract_object_point_clouds
 
 file_client = FileClient(backend='disk')
-load_points_from_file = LoadPointsFromFile(
+_load_points_from_file = LoadPointsFromFile(
     coord_type='LIDAR',
     load_dim=6,
     use_dim=6,
@@ -27,6 +28,12 @@ type_list = [
 ]
 
 
+def load_points_from_file(filename):
+    results = dict(pts_filename=filename)
+    _load_points_from_file(results)
+    return results['points'].tensor.numpy()
+
+
 def convert_kitti_boxes(annos, calib):
     rect = calib['R0_rect'].astype(np.float32)
     Trv2c = calib['Tr_velo_to_cam'].astype(np.float32)
@@ -36,10 +43,37 @@ def convert_kitti_boxes(annos, calib):
             annos['location'], annos['dimensions'], annos['rotation_y'][...,np.newaxis]
         ], axis=1).astype(np.float32)
     ).convert_to(box_mode_3d, np.linalg.inv(rect @ Trv2c))
-    return gt_boxes
+    return gt_boxes.tensor.numpy()
 
 
-def aggregate_waymo_sequence( dataset, seq_idx, output_path=None ):
+def get_waymo_infos( dataset_path ):
+    with open(f'{dataset_path}/kitti_format/waymo_infos_trainval.pkl', 'rb') as f:
+        infos = {info['image']['image_idx']: info for info in pickle.load(f)}
+    
+    print('Loading waymo meta infos:')
+    for prefix, split in enumerate(['training', 'validation']):
+        tfrecords = sorted(glob(f'{dataset_path}/{split}/*.tfrecord'))
+        for seq_id, tfrecord in enumerate(tqdm(tfrecords, desc=f'{split} split')):
+            seq_id = int(seq_id + prefix * 1e3)
+            num_frames = len(list(filter(lambda idx: idx//1e3 == seq_id, infos.keys())))
+            dataset = tf.data.TFRecordDataset(tfrecord, compression_type='')
+            for frame_id, data in enumerate(tqdm(dataset, total=num_frames, desc=f'Seq {seq_id}', leave=False)):
+                frame_id = int(seq_id*1e3 + frame_id)
+                frame = dataset_pb2.Frame()
+                frame.ParseFromString(bytearray(data.numpy()))
+                info = infos[frame_id]
+                info['annos']['obj_ids'] = []
+                for label in frame.laser_labels:
+                    if type_list[label.type] not in selected_waymo_classes:
+                        continue
+                    if label.num_lidar_points_in_box < 1:
+                        continue
+                    info['annos']['obj_ids'].append(label.id)
+
+    return infos
+
+
+def aggregate_waymo_sequence( dataset, seq_id, output_path=None ):
     dataset_path = dataset['dataset_path']
     split = dataset['split']
 
@@ -49,39 +83,39 @@ def aggregate_waymo_sequence( dataset, seq_idx, output_path=None ):
 
     if 'tfrecords' not in dataset:
         dataset['tfrecords'] = sorted(glob(f'{dataset_path}/{split}/*.tfrecord'))
-    sequence = tf.data.TFRecordDataset(dataset['tfrecords'][seq_idx], compression_type='')
-    seq_idx = int(seq_idx + {'training': 0, 'validation': 1}[split] * 1e3)
+    sequence = tf.data.TFRecordDataset(dataset['tfrecords'][seq_id], compression_type='')
+    seq_id = int(seq_id + {'training': 0, 'validation': 1}[split] * 1e3)
 
     obj_points = {}
-    bg_points = np.zeros((0, 6), dtype=np.float32)
+    bg_points = []
 
-    num_frames = len(list(filter(lambda idx: idx//1e3 == seq_idx, infos.keys())))
-    for frame_idx, data in enumerate(tqdm(sequence, total=num_frames, desc=f'Seq {seq_idx}', leave=False)):
-        frame_idx = int(seq_idx*1e3 + frame_idx)
+    num_frames = len(list(filter(lambda idx: idx//1e3 == seq_id, infos.keys())))
+    for frame_id, data in enumerate(tqdm(sequence, total=num_frames, desc=f'Seq {seq_id}', leave=False)):
+        frame_id = int(seq_id*1e3 + frame_id)
         frame = dataset_pb2.Frame()
         frame.ParseFromString(bytearray(data.numpy()))
-        info = infos[frame_idx]
+        info = infos[frame_id]
         annos = info['annos']
-        calib = info['calib']
 
         ######################################################################## 
         # GT boxes for current frame
         ######################################################################## 
-        if 'obj_ids' not in annos:
-            annos['obj_ids'] = []
-            for label in frame.laser_labels:
-                if type_list[label.type] not in selected_waymo_classes:
-                    continue
-                annos['obj_ids'].append(label.id)
-        gt_boxes = convert_kitti_boxes(annos, calib).tensor.numpy()
+        # if 'obj_ids' not in annos:
+        annos['obj_ids'] = []
+        for label in frame.laser_labels:
+            if type_list[label.type] not in selected_waymo_classes:
+                continue
+            if label.num_lidar_points_in_box < 1:
+                continue
+            annos['obj_ids'].append(label.id)
+        gt_boxes = convert_kitti_boxes(annos, info['calib'])
         boxes = { obj_id: box for obj_id, box in zip(annos['obj_ids'], gt_boxes) }
 
         ######################################################################## 
         # Load frame point cloud
         ######################################################################## 
-        results = dict(pts_filename=f'{dataset_path}/kitti_format/training/velodyne/{frame_idx:0>7}.bin')
-        load_points_from_file(results)
-        points = results['points'].tensor.numpy()
+        points = load_points_from_file(f'{dataset_path}/kitti_format/training/velodyne/{frame_id:0>7}.bin')
+        points = np.concatenate([points, np.full((points.shape[0], 1), frame_id)], axis=1)
 
         # Remove noisy points near the LiDAR sensor
         # points = points[np.linalg.norm(points[:,:3], axis=-1) > 2]
@@ -95,15 +129,16 @@ def aggregate_waymo_sequence( dataset, seq_idx, output_path=None ):
         # Transform and aggregate background point clouds
         ######################################################################## 
         points = points[obj_mask.sum(-1) == 0]
-        if 'pose' not in calib:
-            calib['pose'] = np.array([x for x in frame.pose.transform]).reshape((4,4))
+        # if 'pose' not in calib:
+        #     calib['pose'] = np.array([x for x in frame.pose.transform]).reshape((4,4))
         points[:,:3] = np.dot(
             np.concatenate([points[:,:3], np.ones((points.shape[0], 1))], axis=1),
-            calib['pose'].T
+            info['pose'].T
         )[:,:3]
         
-        bg_points = np.concatenate([bg_points, points])
+        bg_points.append(points)
 
+    bg_points = np.concatenate(bg_points)
     
     ############################################################################
     # Save scene and object point clouds
@@ -111,9 +146,9 @@ def aggregate_waymo_sequence( dataset, seq_idx, output_path=None ):
     if output_path is not None:
         os.makedirs(f'{output_path}/sequences', exist_ok=True)
         os.makedirs(f'{output_path}/objects', exist_ok=True)
-        file_client.put(bg_points.flatten().tobytes(), f'{output_path}/sequences/{seq_idx}.bin')
-        for obj_idx, obj_points_i in obj_points.items():
-            file_client.put(obj_points_i.flatten().tobytes(), f'{output_path}/objects/{obj_idx}.bin')
+        file_client.put(bg_points.flatten().tobytes(), f'{output_path}/sequences/{seq_id}.bin')
+        for obj_id, obj_points_i in obj_points.items():
+            file_client.put(obj_points_i.flatten().tobytes(), f'{output_path}/objects/{obj_id}.bin')
     else:
         return bg_points, obj_points
 
@@ -124,34 +159,17 @@ def aggregate_waymo( dataset, begin=0, end=798, output_path=None ):
     infos = dataset['infos']
     dataset['tfrecords'] = sorted(glob(f'{dataset_path}/{split}/*.tfrecord'))
 
-    for seq_idx in tqdm(range(begin, end), desc=f'{split} split'):
-        aggregate_waymo_sequence( dataset, seq_idx, output_path )
+    for seq_id in tqdm(range(begin, end), desc=f'{split} split'):
+        aggregate_waymo_sequence( dataset, seq_id, output_path )
 
 
-def get_waymo_infos( dataset_path ):
-    with open(f'{dataset_path}/kitti_format/waymo_infos_trainval.pkl', 'rb') as f:
-        infos = {info['image']['image_idx']: info for info in pickle.load(f)}
-    
-    print('Loading waymo meta infos:')
-    for prefix, split in enumerate(['training', 'validation']):
-        tfrecords = sorted(glob(f'{dataset_path}/{split}/*.tfrecord'))
-        for seq_idx, tfrecord in enumerate(tqdm(tfrecords, desc=f'{split} split')):
-            seq_idx = int(seq_idx + prefix * 1e3)
-            num_frames = len(list(filter(lambda idx: idx//1e3 == seq_idx, infos.keys())))
-            dataset = tf.data.TFRecordDataset(tfrecord, compression_type='')
-            for frame_idx, data in enumerate(tqdm(dataset, total=num_frames, desc=f'Seq {seq_idx}', leave=False)):
-                frame_idx = int(seq_idx*1e3 + frame_idx)
-                frame = dataset_pb2.Frame()
-                frame.ParseFromString(bytearray(data.numpy()))
-                info = infos[frame_idx]
-                info['calib']['pose'] = np.array([x for x in frame.pose.transform]).reshape((4,4))
-                info['annos']['obj_ids'] = []
-                for label in frame.laser_labels:
-                    if type_list[label.type] not in selected_waymo_classes:
-                        continue
-                    info['annos']['obj_ids'].append(label.id)
-
-    return infos
+def load_waymo_points_with_object_mask( dataset_path, info ):
+    frame_id = info['image']['image_idx']
+    points = load_points_from_file(f'{dataset_path}/kitti_format/training/velodyne/{frame_id:0>7}.bin')
+    gt_boxes = convert_kitti_boxes(info['annos'], info['calib'])
+    boxes = { obj_id: box for obj_id, box in zip(info['annos']['obj_ids'], gt_boxes) }
+    obj_mask = points_in_rbbox(points, np.stack(list(boxes.values())), origin=(0.5, 0.5, 0.))
+    return points, obj_mask
 
 
 def load_waymo_aggregated_points( dataset_path, info ):
