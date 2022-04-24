@@ -190,4 +190,4 @@ if __name__ == '__main__':
         infos=infos
     )
 
-    aggregate_waymo( dataset, begin=scene_begin, end=scene_end, output_path=output_path )
+    aggregate_waymo( dataset, begin=seq_begin, end=seq_end, output_path=output_path )
