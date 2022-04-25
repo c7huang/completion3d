@@ -8,11 +8,12 @@ from tqdm.autonotebook import tqdm
 from nuscenes.nuscenes import NuScenes
 
 from mmcv.fileio import FileClient
+from mmdet3d.core.bbox.box_np_ops import points_in_rbbox
 from mmdet3d.datasets.pipelines.loading import LoadPointsFromFile
 from utils import rot_matrix_2d, extract_object_point_clouds
 
 file_client = FileClient(backend='disk')
-load_points_from_file = LoadPointsFromFile(
+_load_points_from_file = LoadPointsFromFile(
     coord_type='LIDAR',
     load_dim=5,
     use_dim=5,
@@ -20,14 +21,41 @@ load_points_from_file = LoadPointsFromFile(
 )
 
 
-def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
-    frame_pbar = tqdm(total=scene['nbr_samples'], leave=False)
+def load_points_from_file(filename):
+    results = dict(pts_filename=filename)
+    _load_points_from_file(results)
+    return results['points'].tensor.numpy()
+
+
+def get_nuscenes_infos( nusc ):
+    with open(f'{nusc.dataroot}/nuscenes_infos_train.pkl', 'rb') as f:
+        infos = {info['token']: info for info in pickle.load(f)['infos']}
+    with open(f'{nusc.dataroot}/nuscenes_infos_val.pkl', 'rb') as f:
+        infos.update({info['token']: info for info in pickle.load(f)['infos']})
+
+    for scene in nusc.scene:
+        token = scene['first_sample_token']
+        while token != '':
+            sample = nusc.get('sample', token)
+            infos[token]['scene_token'] = scene['token']
+            infos[token]['instance_tokens'] = []
+            for ann_token in sample['anns']:
+                ann = nusc.get('sample_annotation', ann_token )
+                infos[token]['instance_tokens'].append(ann['instance_token'])
+            token = sample['next']
+
+    return infos
+
+
+def aggregate_nuscenes_sequence( nusc, infos, scene_idx, output_path=None ):
+    scene = nusc.scene[scene_idx]
+    frame_pbar = tqdm(total=scene['nbr_samples'], desc=f'Scene {scene_idx}', leave=False)
 
     s_prev = nusc.get('sample', scene['first_sample_token'])
     s_next = None
     
     obj_points = {}
-    bg_points = np.zeros((0, 5), dtype=np.float32)
+    bg_points = []
     
     token = s_prev['data']['LIDAR_TOP']
     while token != '':
@@ -44,9 +72,9 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
                 s_prev = nusc.get('sample', sd['sample_token'])
                 info_prev = infos[s_prev['token']]
                 boxes_prev = {}
-                for ann_token, gt_boxes in zip(s_prev['anns'], info_prev['gt_boxes']):
+                for ann_token, box in zip(s_prev['anns'], info_prev['gt_boxes']):
                     instance_token = nusc.get('sample_annotation', ann_token)['instance_token']
-                    boxes_prev[instance_token] = gt_boxes
+                    boxes_prev[instance_token] = box
             else:
                 s_prev = s_next
                 info_prev = info_next
@@ -58,9 +86,9 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
                 s_next = nusc.get('sample', s_prev['next'])
                 info_next = infos[s_next['token']]
                 boxes_next = {}
-                for ann_token, gt_boxes in zip(s_next['anns'], info_next['gt_boxes']):
+                for ann_token, box in zip(s_next['anns'], info_next['gt_boxes']):
                     instance_token = nusc.get('sample_annotation', ann_token)['instance_token']
-                    boxes_next[instance_token] = gt_boxes
+                    boxes_next[instance_token] = box
             else:
                 s_next = None
                 info_next = None
@@ -85,9 +113,8 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
         ######################################################################## 
         # Load frame point cloud
         ######################################################################## 
-        results = dict(pts_filename=f'{nusc.dataroot}/{sd["filename"]}')
-        load_points_from_file(results)
-        points = results['points'].tensor.numpy()
+        points = load_points_from_file(f'{nusc.dataroot}/{sd["filename"]}')
+        points = np.concatenate([points, np.full((points.shape[0], 1), len(bg_points))], axis=1)
 
         # Remove noisy points near the LiDAR sensor
         points = points[np.linalg.norm(points[:,:3], axis=-1) > 2]
@@ -95,7 +122,10 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
         ######################################################################## 
         # Extract and aggregate object point clouds
         ######################################################################## 
-        obj_mask, obj_points = extract_object_point_clouds(points, boxes, origin=(0.5, 0.5, 0.5), obj_points=obj_points)
+        obj_mask, obj_points = extract_object_point_clouds(
+            points, boxes, origin=(0.5, 0.5, 0.5), 
+            obj_points=obj_points, align=False
+        )
 
         ######################################################################## 
         # Transform and aggregate background point clouds
@@ -115,10 +145,16 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
         points[:,:3] = ego2global_rotation.apply(points[:,:3])
         points[:,:3] += ego2global_translation
 
-        bg_points = np.concatenate([bg_points, points])
+        bg_points.append(points)
 
         # Go to next frame
         token = sd['next']
+    
+
+    # Concatenate point clouds
+    bg_points = np.concatenate(bg_points)
+    for token, obj_points_i in obj_points.items():
+        obj_points[token] = np.concatenate(obj_points_i)
     
     ############################################################################
     # Save scene and object point clouds
@@ -136,42 +172,26 @@ def aggregate_nuscenes_sequence( nusc, infos, scene, output_path=None ):
 
 
 def aggregate_nuscenes( nusc, infos, begin=0, end=850, output_path=None ):
-    for scene in tqdm(nusc.scene[begin:end]):
-        aggregate_nuscenes_sequence( nusc, infos, scene, output_path )
+    for scene_idx in tqdm(range(begin, end), desc=f'NuScenes'):
+        aggregate_nuscenes_sequence( nusc, infos, scene_idx, output_path )
 
 
-def get_nuscenes_infos( nusc ):
-    with open(f'{nusc.dataroot}/nuscenes_infos_train.pkl', 'rb') as f:
-        infos = {info['token']: info for info in pickle.load(f)['infos']}
-    with open(f'{nusc.dataroot}/nuscenes_infos_val.pkl', 'rb') as f:
-        infos.update({info['token']: info for info in pickle.load(f)['infos']})
-
-    for scene in nusc.scene:
-        token = scene['first_sample_token']
-        while token != '':
-            sample = nusc.get('sample', token)
-            infos[token]['scene_token'] = scene['token']
-            infos[token]['instance_tokens'] = []
-            for ann_token in sample['anns']:
-                ann = nusc.get('sample_annotation', ann_token )
-                infos[token]['instance_tokens'].append(ann['instance_token'])
-            token = sample['next']
-
-    return infos
+def load_nuscenes_points_with_object_mask( dataset_path, info ):
+    filename = info['lidar_path'].split('/')[-1]
+    points = load_points_from_file(f'{dataset_path}/samples/LIDAR_TOP/{filename}')
+    boxes = { token: box for token, box in zip(info['instance_tokens'], info['gt_boxes']) }
+    obj_mask = points_in_rbbox(points, np.stack(list(boxes.values())), origin=(0.5, 0.5, 0.5))
+    return points, obj_mask
 
 
 def load_nuscenes_aggregated_points( dataset_path, info ):
     # Load scene point cloud
-    results = dict(pts_filename=f'{dataset_path}/scenes/{info["scene_token"]}.bin')
-    load_points_from_file(results)
-    bg_points = results['points'].tensor.numpy()
+    bg_points = load_points_from_file(f'{dataset_path}/scenes/{info["scene_token"]}.bin')
 
     # Load object point clouds
     obj_points = {}
     for token in info['instance_tokens']:
-        results = dict(pts_filename=f'{dataset_path}/instances/{token}.bin')
-        load_points_from_file(results)
-        obj_points[token] = results['points'].tensor.numpy()
+        obj_points[token] = load_points_from_file(f'{dataset_path}/instances/{token}.bin')
 
     # Transform background points
     global2ego_translation = -np.array(info['ego2global_translation'])

@@ -76,9 +76,6 @@ def get_waymo_infos( dataset_path ):
 def aggregate_waymo_sequence( dataset, seq_id, output_path=None ):
     dataset_path = dataset['dataset_path']
     split = dataset['split']
-
-    if 'infos' not in dataset:
-        dataset['infos'] = get_waymo_infos(dataset_path)
     infos = dataset['infos']
 
     if 'tfrecords' not in dataset:
@@ -123,7 +120,10 @@ def aggregate_waymo_sequence( dataset, seq_id, output_path=None ):
         ######################################################################## 
         # Extract and aggregate object point clouds
         ######################################################################## 
-        obj_mask, obj_points = extract_object_point_clouds(points, boxes, origin=(0.5, 0.5, 0.), obj_points=obj_points)
+        obj_mask, obj_points = extract_object_point_clouds(
+            points, boxes, origin=(0.5, 0.5, 0.),
+            obj_points=obj_points, align=False
+        )
 
         ######################################################################## 
         # Transform and aggregate background point clouds
@@ -138,7 +138,11 @@ def aggregate_waymo_sequence( dataset, seq_id, output_path=None ):
         
         bg_points.append(points)
 
+
+    # Concatenate point clouds
     bg_points = np.concatenate(bg_points)
+    for obj_id, obj_points_i in obj_points.items():
+        obj_points[obj_id] = np.concatenate(obj_points_i)
     
     ############################################################################
     # Save scene and object point clouds
@@ -159,7 +163,7 @@ def aggregate_waymo( dataset, begin=0, end=798, output_path=None ):
     infos = dataset['infos']
     dataset['tfrecords'] = sorted(glob(f'{dataset_path}/{split}/*.tfrecord'))
 
-    for seq_id in tqdm(range(begin, end), desc=f'{split} split'):
+    for seq_id in tqdm(range(begin, end), desc=f'{split.capitalize()} split'):
         aggregate_waymo_sequence( dataset, seq_id, output_path )
 
 
