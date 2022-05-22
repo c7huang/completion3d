@@ -426,9 +426,9 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
         return bg_points, obj_points
 
 
-def aggregate_nuscenes( nusc, infos, begin=0, end=850, output_path=None ):
+def aggregate_nuscenes( nusc, begin=0, end=850, output_path=None ):
     for scene_idx in tqdm(range(begin, end), desc=f'NuScenes'):
-        aggregate_nuscenes_sequence( nusc, infos, scene_idx, output_path )
+        aggregate_nuscenes_sequence( nusc, scene_idx, output_path )
 
 
 if __name__ == '__main__':
