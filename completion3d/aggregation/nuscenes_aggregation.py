@@ -80,12 +80,6 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
     :returns: the aggregation information
     :rtype: dict
     """
-
-    with open(f'{nusc.dataroot}/nuscenes_infos_train.pkl', 'rb') as f:
-        infos = {info['token']: info for info in pickle.load(f)['infos']}
-    with open(f'{nusc.dataroot}/nuscenes_infos_val.pkl', 'rb') as f:
-        infos.update({info['token']: info for info in pickle.load(f)['infos']})
-
     agginfos = {}
     for scene in nusc.scene:
         token = scene['first_sample_token']
@@ -101,6 +95,7 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
                 np.roll(sensor2ego['rotation'], -1),
                 sensor2ego['translation']
             )
+            lidar2global = lidar2global.astype(np.float32)
             global2lidar = np.linalg.inv(lidar2global)
 
             agginfos[token] = {}
@@ -196,6 +191,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
                 np.roll(sensor2ego['rotation'], -1),
                 sensor2ego['translation']
             )
+            sensor2global[sensor] = sensor2global[sensor].astype(np.float32)
             global2sensor[sensor] = np.linalg.inv(sensor2global[sensor])
 
             if 'CAM' in sensor:
@@ -326,9 +322,9 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
         ######################################################################## 
         # Extract image RGB features
         ######################################################################## 
-        points_rgb = np.zeros((points.shape[0], 3))
+        points_rgb = np.zeros((points.shape[0], 3), dtype=np.float32)
         valid_rgb_mask = np.zeros(points.shape[0], dtype=bool)
-        num_valid_rgb = np.zeros(points.shape[0])
+        num_valid_rgb = np.zeros(points.shape[0], dtype=np.uint8)
         for cam in _cameras:
             # Load new camera frame if necessary
             if cam not in cam_load_next_frame or cam_load_next_frame[cam]:
@@ -366,7 +362,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
         else:
             # If the current frame doesn't have segmentation labels,
             # then we assign the label based on nearest points
-            points_labels = np.zeros((points.shape[0], 1))
+            points_labels = np.zeros((points.shape[0], 1), dtype=np.uint8)
             _, ind = KDTree(points_prev[:,:3]).query(
                 transform3d(points[:,:3], sensor2global['LIDAR_TOP']),
                 k=1, distance_upper_bound=1, workers=-1

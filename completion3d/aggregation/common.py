@@ -114,8 +114,8 @@ def reconstruct_object(
     if not isinstance(points_list, list):
         points_list = [points_list]
 
-    if np.concatenate(points_list).shape[0] < 100:
-        return np.zeros((0, points_list[0].shape[1]+7))
+    if np.concatenate(points_list).shape[0] == 0:
+        return np.zeros((0, points_list[0].shape[1]+5), dtype=np.float32)
 
     for i, (points, box) in enumerate(zip(points_list, box_list)):
         # Extract lidar ray direction vector (for computing incidence angle)
@@ -176,7 +176,7 @@ def reconstruct_object(
 
     # 7. Normal estimation
     # (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z)
-    normals = estimate_normals(points, radius=0.1, k=200)
+    normals = estimate_normals(points, radius=0.1, k=200).astype(np.float32)
     normals = np.clip(normals, -1, 1)
     points = np.concatenate([points, normals], axis=-1)
 
@@ -188,7 +188,7 @@ def reconstruct_object(
     flip_mask = incidence > np.pi/2
     points[flip_mask,-3:] *= -1
     incidence[flip_mask] = np.pi - incidence[flip_mask]
-    points = np.concatenate([points, incidence[:,np.newaxis]], axis=-1)    
+    points = np.concatenate([points, incidence[:,np.newaxis].astype(np.float32)], axis=-1)    
 
     # Reformat and drop ray information
     #    (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z,incidence)
@@ -230,7 +230,7 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
 
     # 5. Normal estimation
     # (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z)
-    normals = estimate_normals(points, radius=0.2, k=200)
+    normals = estimate_normals(points, radius=0.2, k=200).astype(np.float32)
     normals = np.clip(normals, -1, 1)
     points = np.concatenate([points, normals], axis=-1)
 
@@ -242,7 +242,7 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
     flip_mask = incidence > np.pi/2
     points[flip_mask,-3:] *= -1
     incidence[flip_mask] = np.pi - incidence[flip_mask]
-    points = np.concatenate([points, incidence[:,np.newaxis]], axis=-1)    
+    points = np.concatenate([points, incidence[:,np.newaxis].astype(np.float32)], axis=-1)    
 
     # Reformat and drop ray information
     #    (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z,incidence)
@@ -257,21 +257,21 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
 
 
 def load_aggregated_points(
-    agg_dataset_path, scene_id, object_ids, boxes,
+    agg_dataset_path, scene_id, object_ids, gt_boxes,
     global2lidar=np.identity(4), num_features=14
 ):
     # Load scene point cloud
     with open(f'{agg_dataset_path}/scenes/{scene_id}.bin', 'rb') as f:
-        bg_points = np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_features)
+        bg_points = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_features))
         # Transform background points
         bg_points[:,:3] = transform3d(bg_points[:,:3], global2lidar)
         bg_points[:,3:6] = transform3d(bg_points[:,3:6], np.linalg.inv(global2lidar).T)
 
     # Load object point clouds
     obj_points = {}
-    for obj_id, box in zip(object_ids, boxes):
+    for obj_id, box in zip(object_ids, gt_boxes):
         with open(f'{agg_dataset_path}/objects/{obj_id}.bin', 'rb') as f:
-            obj_points[obj_id] = np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_features)
+            obj_points[obj_id] = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_features))
             obj_points[obj_id][:,:2] = rotate2d(obj_points[obj_id][:,:2], -box[6])
             obj_points[obj_id][:,3:5] = rotate2d(obj_points[obj_id][:,3:5], -box[6])
             obj_points[obj_id][:,:3] += box[:3]

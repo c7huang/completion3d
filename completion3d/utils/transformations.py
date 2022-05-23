@@ -16,7 +16,7 @@ def cartesian_to_homogeneous(x: ArrayLike) -> np.ndarray:
     :rtype: np.ndarray
     """
     x = np.asarray(x)
-    return np.concatenate([x, np.ones((x.shape[0], 1))], axis=1)
+    return np.concatenate([x, np.ones((x.shape[0], 1), dtype=x.dtype)], axis=1)
 
 
 def rotate2d(x: ArrayLike, angle: ArrayLike) -> np.ndarray:
