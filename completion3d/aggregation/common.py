@@ -191,7 +191,7 @@ def reconstruct_object(
         incidence[flip_mask] = np.pi - incidence[flip_mask]
         points = np.concatenate([points, incidence[:,np.newaxis].astype(np.float32)], axis=-1)    
     else:
-        points = np.concatenate([points, -points[:,-3:], np.zeros((points.shape[0], 1), dtype=np.float32)])
+        points = np.concatenate([points, -points[:,-3:], np.zeros((points.shape[0], 1), dtype=np.float32)], axis=-1)
 
     # Reformat and drop ray information
     #    (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z,incidence)
