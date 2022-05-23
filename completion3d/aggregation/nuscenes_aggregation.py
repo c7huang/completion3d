@@ -369,7 +369,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
             points_labels = np.zeros((points.shape[0], 1))
             _, ind = KDTree(points_prev[:,:3]).query(
                 transform3d(points[:,:3], sensor2global['LIDAR_TOP']),
-                k=1, distance_upper_bound=1, n_jobs=-1
+                k=1, distance_upper_bound=1, workers=-1
             )
             valid = ind < points_prev.shape[0]
             points_labels[valid,0] = points_prev[ind[valid],-1]
@@ -417,11 +417,15 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
     if output_path is not None:
         os.makedirs(f'{output_path}/scenes', exist_ok=True)
         os.makedirs(f'{output_path}/objects', exist_ok=True)
+        pbar = tqdm(total=len(obj_points)+1, desc=f'[{scene_idx}] Saving point clouds', leave=False)
         with open(f'{output_path}/scenes/{scene["token"]}.bin', 'wb') as f:
             f.write(zlib.compress(bg_points.flatten().tobytes()))
+            pbar.update()
         for instance_token, obj_points_i in obj_points.items():
             with open(f'{output_path}/objects/{instance_token}.bin', 'wb') as f:
                 f.write(zlib.compress(obj_points_i.flatten().tobytes()))
+                pbar.update()
+        pbar.close()
     else:
         return bg_points, obj_points
 

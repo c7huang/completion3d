@@ -48,7 +48,7 @@ def extract_objects(points, boxes, origin=(0.5, 0.5, 0.0), obj_points=None):
         obj_points = {}
 
     if len(boxes) == 0:
-        return np.zeros((points.shape[0], 1), dtype=bool), obj_points
+        return obj_points, np.zeros((points.shape[0], 1), dtype=bool)
 
     # Identify points in boxes
     # obj_mask: (# points, # boxes)
