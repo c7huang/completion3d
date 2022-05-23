@@ -12,7 +12,7 @@ from tqdm.autonotebook import tqdm
 from nuscenes.nuscenes import NuScenes
 from ..utils.transformations import (
     transform3d, interpolate,
-    transformation3d_from_rotation_translation,
+    transformation3d_with_translation,
     transformation3d_from_quaternion_translation
 )
 from .common import (
@@ -69,8 +69,8 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
             'frame_id': {
                 'scene_id': the sequence corresponding to the current frame,
                 'object_ids': a list of ids corresponding to each object,
-                'global2lidar': a 4x4 transformation from global coordinate
-                system to lidar coordinate system
+                'scene_transformation': a 4x4 transformation from global
+                coordinate system to lidar coordinate system
             },
             ...
         }
@@ -95,11 +95,10 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
                 np.roll(sensor2ego['rotation'], -1),
                 sensor2ego['translation']
             )
-            lidar2global = lidar2global.astype(np.float32)
-            global2lidar = np.linalg.inv(lidar2global)
+            global2lidar = np.linalg.inv(lidar2global).astype(np.float32)
 
             agginfos[token] = {}
-            agginfos[token]['global2lidar'] = global2lidar
+            agginfos[token]['scene_transformation'] = global2lidar
             agginfos[token]['scene_id'] = scene['token']
             agginfos[token]['object_ids'] = []
             for ann_token in s['anns']:
@@ -339,7 +338,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
 
             # Extract rgb features from image
             # https://github.com/nutonomy/nuscenes-devkit/blob/master/python-sdk/nuscenes/nuscenes.py#L834
-            lidar2cam = transformation3d_from_rotation_translation(
+            lidar2cam = transformation3d_with_translation(
                     cam_intrinsic[cam]
                 ) @ global2sensor[cam] @ sensor2global['LIDAR_TOP']
             points_rgb_i, valid_rgb_mask_i = points_rgb_from_image(points, image[cam], lidar2cam)

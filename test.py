@@ -15,7 +15,7 @@ from mmdet3d.datasets import build_dataloader, build_dataset
 from mmdet3d.models import build_model
 from mmdet.apis import multi_gpu_test, set_random_seed
 from mmdet.datasets import replace_ImageToTensor
-from completion3d import *
+from completion3d.datasets import *
 
 
 def parse_args():

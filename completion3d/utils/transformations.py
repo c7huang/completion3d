@@ -35,24 +35,24 @@ def rotate2d(x: ArrayLike, angle: ArrayLike) -> np.ndarray:
     return np.dot(np.asarray(x)[:,:2], rot.T)
 
 
-def transformation3d_from_rotation_translation(
-    rotation_matrix: ArrayLike = np.identity(3),
+def transformation3d_with_translation(
+    transformation: ArrayLike = np.identity(3),
     translation: ArrayLike = np.zeros(3)
 ) -> np.ndarray: 
-    """Compute a 3d transformation matrix (4x4) from a rotation matrix and
-    translation vector.
+    """Compute a 3d transformation matrix (4x4) from a 3x3 transformation matrix
+    and translation vector.
 
-    :param rotation_matrix: a 3x3 rotation matrix
-    :type rotation_matrix: array_like
+    :param transformation: a 3x3 rotation matrix
+    :type transformation: array_like
     :param translation: translation vector
     :type translation: array_like
     :returns: a 4x4 transformation matrix
     :rtype: np.ndarray
     """
-    transformation = np.identity(4)
-    transformation[:3,:3] = np.asarray(rotation_matrix)
-    transformation[:3,3] = np.asarray(translation)
-    return transformation
+    transformation4x4 = np.identity(4)
+    transformation4x4[:3,:3] = np.asarray(transformation)
+    transformation4x4[:3,3] = np.asarray(translation)
+    return transformation4x4
 
 
 def transformation3d_from_quaternion_translation(
@@ -68,7 +68,7 @@ def transformation3d_from_quaternion_translation(
     :returns: a 4x4 transformation matrix
     :rtype: np.ndarray
     """
-    return transformation3d_from_rotation_translation(
+    return transformation3d_with_translation(
         R.from_quat(quaternion).as_matrix(), translation
     )
 

@@ -8,9 +8,7 @@ except:
     ArrayLike = Union[tuple, list, np.ndarray]
 from sklearn.linear_model import RANSACRegressor
 from mmdet3d.core.bbox.box_np_ops import points_in_rbbox
-from ..utils.transformations import (
-    rotate2d, transform3d, interpolate
-)
+from ..utils.transformations import rotate2d, transform3d
 from ..utils.o3dutils import (
     incremental_icp, 
     voxel_grid_downsample,
@@ -261,22 +259,49 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
 
 def load_aggregated_points(
     agg_dataset_path, scene_id, object_ids, gt_boxes,
-    global2lidar=np.identity(4), num_features=14
+    scene_transformation=np.identity(4), 
+    num_point_features=14, use_point_features=None,
+    point_cloud_range=None, combine=True,
 ):
+    if use_point_features is None or not isinstance(use_point_features, (list, tuple)):
+        use_point_features = list(range(num_point_features))
+    if point_cloud_range is None:
+        point_cloud_range = [-np.inf,-np.inf,-np.inf,np.inf,np.inf,np.inf]
+
     # Load scene point cloud
     with open(f'{agg_dataset_path}/scenes/{scene_id}.bin', 'rb') as f:
-        bg_points = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_features))
+        bg_points = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_point_features))
         # Transform background points
-        bg_points[:,:3] = transform3d(bg_points[:,:3], global2lidar)
-        bg_points[:,3:6] = transform3d(bg_points[:,3:6], np.linalg.inv(global2lidar).T)
+        bg_points[:,:3] = transform3d(bg_points[:,:3], scene_transformation)
+        bg_points[:,3:6] = transform3d(bg_points[:,3:6], np.linalg.inv(scene_transformation).T)
+        bg_range_mask = bg_points[:,0] > point_cloud_range[0]
+        bg_range_mask &= bg_points[:,0] < point_cloud_range[3]
+        bg_range_mask &= bg_points[:,1] > point_cloud_range[1]
+        bg_range_mask &= bg_points[:,1] < point_cloud_range[4]
+        bg_range_mask &= bg_points[:,2] > point_cloud_range[2]
+        bg_range_mask &= bg_points[:,2] < point_cloud_range[5]
+        bg_points = bg_points[bg_range_mask][:,use_point_features]
 
     # Load object point clouds
     obj_points = {}
     for obj_id, box in zip(object_ids, gt_boxes):
-        with open(f'{agg_dataset_path}/objects/{obj_id}.bin', 'rb') as f:
-            obj_points[obj_id] = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_features))
-            obj_points[obj_id][:,:2] = rotate2d(obj_points[obj_id][:,:2], -box[6])
-            obj_points[obj_id][:,3:5] = rotate2d(obj_points[obj_id][:,3:5], -box[6])
-            obj_points[obj_id][:,:3] += box[:3]
+        try:
+            with open(f'{agg_dataset_path}/objects/{obj_id}.bin', 'rb') as f:
+                obj_points[obj_id] = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_point_features))
+                obj_points[obj_id][:,:2] = rotate2d(obj_points[obj_id][:,:2], -box[6])
+                obj_points[obj_id][:,3:5] = rotate2d(obj_points[obj_id][:,3:5], -box[6])
+                obj_points[obj_id][:,:3] += box[:3]
+                obj_range_mask = obj_points[obj_id][:,0] > point_cloud_range[0]
+                obj_range_mask &= obj_points[obj_id][:,0] < point_cloud_range[3]
+                obj_range_mask &= obj_points[obj_id][:,1] > point_cloud_range[1]
+                obj_range_mask &= obj_points[obj_id][:,1] < point_cloud_range[4]
+                obj_range_mask &= obj_points[obj_id][:,2] > point_cloud_range[2]
+                obj_range_mask &= obj_points[obj_id][:,2] < point_cloud_range[5]
+                obj_points[obj_id] = obj_points[obj_id][obj_range_mask][:,use_point_features]
+        except:
+            pass
 
-    return bg_points, obj_points
+    if combine:
+        return np.concatenate([bg_points, *list(obj_points.values())])
+    else:
+        return bg_points, obj_points
