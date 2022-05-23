@@ -162,33 +162,36 @@ def reconstruct_object(
     # Concatenate points
     points = np.concatenate(points_list)
 
-    # 4. Ground point removal (ransac plane fitting)
-    if remove_ground:
-        ground_mask = ransac_ground_segmentation(points, np.max(box_list, axis=0)[3:6], origin)
-        points = points[~ground_mask]
+    if points.shape[0] > 100:
+        # 4. Ground point removal (ransac plane fitting)
+        if remove_ground:
+            ground_mask = ransac_ground_segmentation(points, np.max(box_list, axis=0)[3:6], origin)
+            points = points[~ground_mask]
 
-    # 5. Voxel-grid down sample with voxel size of (2cm x 2cm x 2cm)
-    _, ind = voxel_grid_downsample(points[:,:3], 0.02, average=False)
-    points = points[ind]
+        # 5. Voxel-grid down sample with voxel size of (2cm x 2cm x 2cm)
+        _, ind = voxel_grid_downsample(points[:,:3], 0.02, average=False)
+        points = points[ind]
 
-    # 6. Statistical outlier removal
-    points = statistical_outlier_removal(points, 30, 2.0)
+        # 6. Statistical outlier removal
+        points = statistical_outlier_removal(points, 30, 2.0)
 
-    # 7. Normal estimation
-    # (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z)
-    normals = estimate_normals(points, radius=0.1, k=200).astype(np.float32)
-    normals = np.clip(normals, -1, 1)
-    points = np.concatenate([points, normals], axis=-1)
+        # 7. Normal estimation
+        # (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z)
+        normals = estimate_normals(points, radius=0.1, k=200).astype(np.float32)
+        normals = np.clip(normals, -1, 1)
+        points = np.concatenate([points, normals], axis=-1)
 
-    # 8. Incidence angle calculation
-    # (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z,incidence)
-    rays = points[:,-6:-3]
-    normals = points[:,-3:]
-    incidence = np.arccos(normals[:,0]*rays[:,0]+normals[:,1]*rays[:,1]+normals[:,2]*rays[:,2])
-    flip_mask = incidence > np.pi/2
-    points[flip_mask,-3:] *= -1
-    incidence[flip_mask] = np.pi - incidence[flip_mask]
-    points = np.concatenate([points, incidence[:,np.newaxis].astype(np.float32)], axis=-1)    
+        # 8. Incidence angle calculation
+        # (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z,incidence)
+        rays = points[:,-6:-3]
+        normals = points[:,-3:]
+        incidence = np.arccos(normals[:,0]*rays[:,0]+normals[:,1]*rays[:,1]+normals[:,2]*rays[:,2])
+        flip_mask = incidence > np.pi/2
+        points[flip_mask,-3:] *= -1
+        incidence[flip_mask] = np.pi - incidence[flip_mask]
+        points = np.concatenate([points, incidence[:,np.newaxis].astype(np.float32)], axis=-1)    
+    else:
+        points = np.concatenate([points, -points[:,-3:], np.zeros((points.shape[0], 1), dtype=np.float32)])
 
     # Reformat and drop ray information
     #    (x,y,z,lidar,r,g,b,label,range,ray_x,ray_y,ray_z,n_x,n_y,n_z,incidence)
