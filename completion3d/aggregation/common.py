@@ -263,7 +263,9 @@ def load_aggregated_points(
     num_point_features=14, use_point_features=None,
     point_cloud_range=None, combine=True,
 ):
-    if use_point_features is None or not isinstance(use_point_features, (list, tuple)):
+    if isinstance(use_point_features, int):
+        use_point_features = list(range(use_point_features))
+    elif use_point_features is None or not isinstance(use_point_features, (list, tuple, np.ndarray)):
         use_point_features = list(range(num_point_features))
     if point_cloud_range is None:
         point_cloud_range = [-np.inf,-np.inf,-np.inf,np.inf,np.inf,np.inf]
