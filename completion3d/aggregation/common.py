@@ -7,7 +7,7 @@ except:
     from typing import Union
     ArrayLike = Union[tuple, list, np.ndarray]
 from sklearn.linear_model import RANSACRegressor
-from mmdet3d.core.bbox.box_np_ops import points_in_rbbox
+from ..utils.box_np_ops import points_in_rbbox
 from ..utils.transformations import rotate2d, transform3d
 from ..utils.o3dutils import (
     incremental_icp, 
