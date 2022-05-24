@@ -285,21 +285,18 @@ def load_aggregated_points(
     # Load object point clouds
     obj_points = {}
     for obj_id, box in zip(object_ids, gt_boxes):
-        try:
-            with open(f'{agg_dataset_path}/objects/{obj_id}.bin', 'rb') as f:
-                obj_points[obj_id] = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_point_features))
-                obj_points[obj_id][:,:2] = rotate2d(obj_points[obj_id][:,:2], -box[6])
-                obj_points[obj_id][:,3:5] = rotate2d(obj_points[obj_id][:,3:5], -box[6])
-                obj_points[obj_id][:,:3] += box[:3]
-                obj_range_mask = obj_points[obj_id][:,0] > point_cloud_range[0]
-                obj_range_mask &= obj_points[obj_id][:,0] < point_cloud_range[3]
-                obj_range_mask &= obj_points[obj_id][:,1] > point_cloud_range[1]
-                obj_range_mask &= obj_points[obj_id][:,1] < point_cloud_range[4]
-                obj_range_mask &= obj_points[obj_id][:,2] > point_cloud_range[2]
-                obj_range_mask &= obj_points[obj_id][:,2] < point_cloud_range[5]
-                obj_points[obj_id] = obj_points[obj_id][obj_range_mask][:,use_point_features]
-        except:
-            pass
+        with open(f'{agg_dataset_path}/objects/{obj_id}.bin', 'rb') as f:
+            obj_points[obj_id] = np.array(np.frombuffer(zlib.decompress(f.read()), dtype=np.float32).reshape(-1, num_point_features))
+            obj_points[obj_id][:,:2] = rotate2d(obj_points[obj_id][:,:2], -box[6])
+            obj_points[obj_id][:,3:5] = rotate2d(obj_points[obj_id][:,3:5], -box[6])
+            obj_points[obj_id][:,:3] += box[:3]
+            obj_range_mask = obj_points[obj_id][:,0] > point_cloud_range[0]
+            obj_range_mask &= obj_points[obj_id][:,0] < point_cloud_range[3]
+            obj_range_mask &= obj_points[obj_id][:,1] > point_cloud_range[1]
+            obj_range_mask &= obj_points[obj_id][:,1] < point_cloud_range[4]
+            obj_range_mask &= obj_points[obj_id][:,2] > point_cloud_range[2]
+            obj_range_mask &= obj_points[obj_id][:,2] < point_cloud_range[5]
+            obj_points[obj_id] = obj_points[obj_id][obj_range_mask][:,use_point_features]
 
     if combine:
         return np.concatenate([bg_points, *list(obj_points.values())])
