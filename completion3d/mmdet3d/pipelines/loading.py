@@ -1,16 +1,80 @@
 import pickle
 import numpy as np
+import torch
 
+from typing import Optional
+try:
+    from numpy.typing import ArrayLike
+except:
+    from typing import Union
+    ArrayLike = Union[tuple, list, np.ndarray]
 from mmdet.datasets.builder import PIPELINES
+from mmdet3d.core import LiDARInstance3DBoxes, LiDARPoints
 from ...aggregation.common import load_aggregated_points
-from ...utils.transformations import transformation3d_with_translation
+from ...utils.transformations import transform3d, transformation3d_with_translation
 
 
 @PIPELINES.register_module()
 class LoadAggregatedPoints(object):
-    def __init__(self, agg_dataset_path, dbinfos_path, agginfos_path,
-        num_point_features, use_point_features=None, point_cloud_range=None
+    """Load the aggregated version of the point cloud for the current frame.
+
+    This pipeline expects the following fields to be loaded before it:
+        * gt_bboxes_3d           (from LoadAnnotations3D)
+
+    If any augmentation is applied (e.g., ObjectSample, GlobalRotScaleTrans,
+    RandomFlip3D), they should be applied before this pipeline as well.
+
+    :param agg_dataset_path: the aggregated dataset location.
+        It needs to contain two folders: "scenes" and "objects".
+        Each folder contains the aggregated point clouds stored in zlib
+        compressed bytes format and can be loaded into float32 numpy arrays.
+    :type agg_dataset_path: str
+    :param agginfos_path: the agginfos file generated using
+        `completion3d.aggregation.xxx_aggregation`
+    :type agginfos_path: str
+    :param dbinfos_path: the dbinfos file generated during the mmdetection3d
+        data preparation process
+    :type dbinfos_path: str
+    :param num_point_features: the number of features in the aggregated point
+        clouds. This should be 14 for nuscenes and 15 for Waymo
+    :type num_point_features: int
+    :param use_point_features: the indices of the point features that will be
+        kept and used after loading
+    :type use_point_features: ArrayLike | int | None
+    :param box_origin: the relative location of the bounding box center inside
+        the object
+    :type box_origin: ArrayLike | None
+    :param point_cloud_range: the range of the point cloud in 
+        `[x_min, y_min, z_min, x_max, y_max, z_max]` format.
+        The points outside of this range will be discarded.
+    :type point_cloud_range: ArrayLike | None
+    :param load_as: the key inside the dictionary the aggregated point cloud
+        will be stored in. Set it to 'points' to replace the original sparse
+        point cloud.
+    :type load_as: str
+    :param load_format: the format the aggregated point cloud will be stored in
+        the dictionary. Possible values are: numpy, tensor, mmdet3d
+    :type load_format: str
+    """
+
+    def __init__(
+        self,
+        agg_dataset_path: str,  agginfos_path: str, dbinfos_path: str,
+        num_point_features: int,
+        use_point_features: Union[ArrayLike, int, None] = None,
+        box_origin: Optional[ArrayLike] = (0.5, 0.5, 0.0),
+        point_cloud_range: Optional[ArrayLike] = None,
+        load_as: str = 'points_agg', load_format: str = 'mmdet3d'
     ):
+        if box_origin is None:
+            box_origin = np.array([0.5, 0.5, 0.0])
+        if isinstance(use_point_features, int):
+            use_point_features = list(range(use_point_features))
+        elif use_point_features is None or not isinstance(use_point_features, (list, tuple, np.ndarray)):
+            use_point_features = list(range(num_point_features))
+        if point_cloud_range is None:
+            point_cloud_range = [-np.inf,-np.inf,-np.inf,np.inf,np.inf,np.inf]
+
         self.agg_dataset_path = agg_dataset_path
 
         with open(dbinfos_path, 'rb') as f:
@@ -21,7 +85,10 @@ class LoadAggregatedPoints(object):
 
         self.num_point_features = num_point_features
         self.use_point_features = use_point_features
+        self.box_origin_shift = np.asarray(box_origin)-np.array([0.5, 0.5, 0.0])
         self.point_cloud_range = point_cloud_range
+        self.load_as = load_as
+        self.load_format = load_format
 
         self.group_id2object_id = {}
         for infos in dbinfos.values():
@@ -36,64 +103,143 @@ class LoadAggregatedPoints(object):
         agginfo = self.agginfos[input_dict['sample_idx']]
         scene_id = agginfo['scene_id']
         scene_transformation = agginfo['scene_transformation']
+        aug_transformation = np.identity(4)
+        gt_boxes = input_dict['gt_bboxes_3d']
+        gt_boxes = LiDARInstance3DBoxes(
+            tensor = gt_boxes.tensor.clone(), 
+            box_dim = gt_boxes.box_dim, 
+            with_yaw = gt_boxes.with_yaw
+        )
 
-        # Apply transformations from augmentation
+        transformation_3d_flow = []
         if 'transformation_3d_flow' in input_dict:
-            for t in input_dict['transformation_3d_flow']:
+            transformation_3d_flow = input_dict['transformation_3d_flow']
+            for t in reversed(transformation_3d_flow):
                 if t == 'R':
-                    scene_transformation = transformation3d_with_translation(
-                        transformation=np.linalg.inv(input_dict['pcd_rotation'])
-                    ) @ scene_transformation
+                    pcd_rotation = input_dict['pcd_rotation'].T
+                    aug_transformation = aug_transformation @ \
+                        transformation3d_with_translation(
+                            transformation=pcd_rotation
+                        )
+                    pcd_rotation_angle = np.arctan2(pcd_rotation[0,1], pcd_rotation[0,0])
+                    gt_boxes.rotate(-pcd_rotation_angle)
                 elif t == 'S':
-                    scene_transformation = transformation3d_with_translation(
-                        transformation=np.identity(3)*input_dict['pcd_scale_factor']
-                    ) @ scene_transformation
+                    pcd_scale_factor = input_dict['pcd_scale_factor']
+                    aug_transformation = aug_transformation @ \
+                        transformation3d_with_translation(
+                            transformation=np.identity(3)*pcd_scale_factor
+                        )
+                    gt_boxes.scale(1/pcd_scale_factor)
                 elif t == 'T':
-                    scene_transformation = transformation3d_with_translation(
-                        translation=input_dict['pcd_trans']
-                    ) @ scene_transformation
+                    pcd_trans = input_dict['pcd_trans']
+                    aug_transformation = aug_transformation @ \
+                        transformation3d_with_translation(
+                            translation=pcd_trans
+                        )
+                    gt_boxes.translate(-pcd_trans)
                 elif t == 'HF':
                     horizontal_flip = np.identity(4)
                     horizontal_flip[1,1] = -1
-                    scene_transformation = horizontal_flip @ scene_transformation
+                    aug_transformation = aug_transformation @ horizontal_flip
+                    gt_boxes.flip('horizontal')
                 elif t == 'VF':
                     vertical_flip = np.identity(4)
                     vertical_flip[0,0] = -1
-                    scene_transformation = vertical_flip @ scene_transformation
-        
+                    aug_transformation = aug_transformation @ vertical_flip
+                    gt_boxes.flip('vertical')
+
         # Get objects from dbsample augmentation
         object_ids = agginfo['object_ids']
         if 'dbsample_group_ids' in input_dict:
-            object_ids += [self.group_id2object_id[group_id] for group_id in input_dict['dbsample_group_ids']]
+            object_ids += [
+                self.group_id2object_id[group_id] \
+                for group_id in input_dict['dbsample_group_ids']
+            ]
 
-        # print(scene_id)
+        # Shift box origin based on the aggregated point cloud format
+        gt_boxes = gt_boxes.tensor.numpy()
+        gt_boxes[:,:3] += self.box_origin_shift * gt_boxes[:,3:6]
+
         points_agg = load_aggregated_points(
             agg_dataset_path = self.agg_dataset_path,
             scene_id = scene_id,
             object_ids = object_ids,
-            gt_boxes = input_dict['gt_bboxes_3d'].tensor.numpy()[:,:7],
+            gt_boxes = gt_boxes,
             scene_transformation = scene_transformation,
             num_point_features = self.num_point_features,
             use_point_features = self.use_point_features,
-            point_cloud_range = self.point_cloud_range,
             combine = True
         )
 
-        input_dict['points_agg'] = points_agg
+        points_agg[:,:3] = transform3d(points_agg[:,:3], aug_transformation)
+        range_mask = points_agg[:,0] > self.point_cloud_range[0]
+        range_mask &= points_agg[:,0] < self.point_cloud_range[3]
+        range_mask &= points_agg[:,1] > self.point_cloud_range[1]
+        range_mask &= points_agg[:,1] < self.point_cloud_range[4]
+        range_mask &= points_agg[:,2] > self.point_cloud_range[2]
+        range_mask &= points_agg[:,2] < self.point_cloud_range[5]
+        points_agg = points_agg[range_mask]
 
+        if self.load_format == 'numpy':
+            input_dict[self.load_as] = points_agg
+        elif self.load_format == 'tensor':
+            input_dict[self.load_as] = torch.as_tensor(
+                points_agg,
+                dtype=torch.float32,
+                device=torch.device('cpu')
+            )
+        elif self.load_format == 'mmdet3d':
+            input_dict[self.load_as] = LiDARPoints(
+                tensor = points_agg,
+                points_dim = len(self.use_point_features)
+            )
+        else:
+            raise ValueError(f'unknown format {self.load_format}')
+
+        ########################################################################
         # DEBUG: plot and compare the point clouds after augmentation
+        ########################################################################
         # import matplotlib.pyplot as plt
-        # plt.figure(figsize=(24,12))
+        # from matplotlib.patches import Rectangle
+        # from matplotlib.transforms import Affine2D
+        # plt.figure(figsize=(16,8))
         # plt.subplot(1,2,1)
-        # plt.scatter(input_dict['points'][:,0], input_dict['points'][:,1], s=100/input_dict['points'].shape[0])
+        # plt.scatter(
+        #     input_dict['points'][:,0], input_dict['points'][:,1],
+        #     s=0.001, alpha=0.5
+        # )
+        # for box in input_dict['gt_bboxes_3d'].tensor.numpy():
+        #     plt.gca().add_patch(Rectangle(
+        #         box[:2]-box[3:5]/2, box[3], box[4],
+        #         lw=1, ec='tab:orange', fc='tab:orange', alpha=0.25,
+        #         transform=Affine2D().rotate_around(box[0], box[1], -box[6]) + 
+        #             plt.gca().transData
+        #     ))
         # plt.xlim((self.point_cloud_range[0], self.point_cloud_range[3]))
         # plt.ylim((self.point_cloud_range[1], self.point_cloud_range[4]))
 
         # plt.subplot(1,2,2)
-        # plt.scatter(points_agg[:,0], points_agg[:,1], s=100/points_agg.shape[0])
+        # plt.scatter(points_agg[:,0], points_agg[:,1], s=0.00001, alpha=0.5)
+        # for box in input_dict['gt_bboxes_3d'].tensor.numpy():
+        #     plt.gca().add_patch(Rectangle(
+        #         box[:2]-box[3:5]/2, box[3], box[4],
+        #         lw=1, ec='tab:orange', fc='tab:orange', alpha=0.25,
+        #         transform=Affine2D().rotate_around(box[0], box[1], -box[6]) + 
+        #             plt.gca().transData
+        #     ))
         # plt.xlim((self.point_cloud_range[0], self.point_cloud_range[3]))
         # plt.ylim((self.point_cloud_range[1], self.point_cloud_range[4]))
 
+        # plt.suptitle(
+        #     f'R:{pcd_rotation_angle:.2f} '
+        #     f'S:{pcd_scale_factor:.2f} '
+        #     f'HF:{"HF" in transformation_3d_flow} '
+        #     f'VF:{"VF" in transformation_3d_flow}'
+        # )
         # plt.tight_layout()
         # plt.savefig(f'{input_dict["sample_idx"]}.png')
         # plt.close()
+        # raise
+        ########################################################################
+
+        return input_dict
