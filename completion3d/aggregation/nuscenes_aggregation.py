@@ -80,10 +80,16 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
     :returns: the aggregation information
     :rtype: dict
     """
+    with open(f'{nusc.dataroot}/nuscenes_infos_train.pkl', 'rb') as f:
+        infos = {info['token']: info for info in pickle.load(f)['infos']}
+    with open(f'{nusc.dataroot}/nuscenes_infos_val.pkl', 'rb') as f:
+        infos.update({info['token']: info for info in pickle.load(f)['infos']})
+
     agginfos = {}
     for scene in nusc.scene:
         token = scene['first_sample_token']
         while token != '':
+            info = infos[token]
             s = nusc.get('sample', token)
             sd = nusc.get('sample_data', s['data']['LIDAR_TOP'])
             sensor2ego = nusc.get('calibrated_sensor', sd['calibrated_sensor_token'])
@@ -101,7 +107,9 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
             agginfos[token]['scene_transformation'] = global2lidar
             agginfos[token]['scene_id'] = scene['token']
             agginfos[token]['object_ids'] = []
-            for ann_token in s['anns']:
+            for ann_token, valid in zip(s['anns'], info['valid_flag']):
+                if not valid:
+                    continue
                 ann = nusc.get('sample_annotation', ann_token )
                 agginfos[token]['object_ids'].append(ann['instance_token'])
             token = s['next']
