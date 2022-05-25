@@ -1,5 +1,12 @@
 _base_ = ['./centerpoint_0075voxel_second_secfpn_dcn_circlenms_4x8_cyclic_20e_nus.py']
 
+log_config = dict(
+    interval=1,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
+
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
@@ -57,6 +64,7 @@ agg_loader = dict(
     use_point_features = [0,1,2,-2,-1],
     box_origin = (0.5, 0.5, 0.5),
     point_cloud_range = point_cloud_range,
+    compression = None,
     load_as = 'points',
     load_format = 'mmdet3d'
 )
@@ -154,7 +162,7 @@ eval_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     workers_per_gpu=4,
     train=dict(
         type='CBGSDataset',

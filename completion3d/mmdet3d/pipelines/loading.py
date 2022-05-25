@@ -2,11 +2,10 @@ import pickle
 import numpy as np
 import torch
 
-from typing import Optional
+from typing import Optional, Union
 try:
     from numpy.typing import ArrayLike
 except:
-    from typing import Union
     ArrayLike = Union[tuple, list, np.ndarray]
 from mmdet.datasets.builder import PIPELINES
 from mmdet3d.core import LiDARInstance3DBoxes, LiDARPoints
@@ -26,8 +25,8 @@ class LoadAggregatedPoints(object):
 
     :param agg_dataset_path: the aggregated dataset location.
         It needs to contain two folders: "scenes" and "objects".
-        Each folder contains the aggregated point clouds stored in zlib
-        compressed bytes format and can be loaded into float32 numpy arrays.
+        Each folder contains the aggregated point clouds stored in bytes and can
+        be loaded into float32 numpy arrays.
     :type agg_dataset_path: str
     :param agginfos_path: the agginfos file generated using
         `completion3d.aggregation.xxx_aggregation`
@@ -48,6 +47,9 @@ class LoadAggregatedPoints(object):
         `[x_min, y_min, z_min, x_max, y_max, z_max]` format.
         The points outside of this range will be discarded.
     :type point_cloud_range: ArrayLike | None
+    :param compression: if the aggregated dataset is in compressed format (e.g.,
+        zlib), specify the compression algorithm here
+    :type compression: bool | str | None
     :param load_as: the key inside the dictionary the aggregated point cloud
         will be stored in. Set it to 'points' to replace the original sparse
         point cloud.
@@ -64,16 +66,15 @@ class LoadAggregatedPoints(object):
         use_point_features: Union[ArrayLike, int, None] = None,
         box_origin: Optional[ArrayLike] = (0.5, 0.5, 0.0),
         point_cloud_range: Optional[ArrayLike] = None,
+        compression: Union[bool, str, None] = None,
         load_as: str = 'points_agg', load_format: str = 'mmdet3d'
     ):
         if box_origin is None:
-            box_origin = np.array([0.5, 0.5, 0.0])
+            box_origin = torch.as_tensor([0.5, 0.5, 0.0], dtype=torch.float32)
         if isinstance(use_point_features, int):
             use_point_features = list(range(use_point_features))
         elif use_point_features is None or not isinstance(use_point_features, (list, tuple, np.ndarray)):
             use_point_features = list(range(num_point_features))
-        if point_cloud_range is None:
-            point_cloud_range = [-np.inf,-np.inf,-np.inf,np.inf,np.inf,np.inf]
 
         self.agg_dataset_path = agg_dataset_path
 
@@ -85,8 +86,10 @@ class LoadAggregatedPoints(object):
 
         self.num_point_features = num_point_features
         self.use_point_features = use_point_features
-        self.box_origin_shift = np.asarray(box_origin)-np.array([0.5, 0.5, 0.0])
+        self.box_origin_shift = torch.as_tensor(box_origin, dtype=torch.float32) - \
+            torch.as_tensor([0.5, 0.5, 0.0], dtype=torch.float32)
         self.point_cloud_range = point_cloud_range
+        self.compression = compression
         self.load_as = load_as
         self.load_format = load_format
 
@@ -101,9 +104,6 @@ class LoadAggregatedPoints(object):
 
     def __call__(self, input_dict):
         agginfo = self.agginfos[input_dict['sample_idx']]
-        scene_id = agginfo['scene_id']
-        scene_transformation = agginfo['scene_transformation']
-        aug_transformation = np.identity(4)
         gt_boxes = input_dict['gt_bboxes_3d']
         gt_boxes = LiDARInstance3DBoxes(
             tensor = gt_boxes.tensor.clone(), 
@@ -111,74 +111,92 @@ class LoadAggregatedPoints(object):
             with_yaw = gt_boxes.with_yaw
         )
 
+        # Shift box origin based on the aggregated point cloud format
+        gt_boxes.tensor[:,:3] += self.box_origin_shift * gt_boxes.tensor[:,3:6]
+
+        # Handle transformation augmentations
+        # 1. undo all the transformations to the bounding boxes
+        # 2. aggregate the final transformation matrix `aug_transformation`
+        aug_transformation = None
         transformation_3d_flow = []
         if 'transformation_3d_flow' in input_dict:
+            aug_transformation = np.identity(4)
             transformation_3d_flow = input_dict['transformation_3d_flow']
             for t in reversed(transformation_3d_flow):
                 if t == 'R':
                     pcd_rotation = input_dict['pcd_rotation'].T
+                    pcd_rotation_angle = np.arctan2(pcd_rotation[0,1], pcd_rotation[0,0])
+                    # Undo augmentation
+                    gt_boxes.rotate(-pcd_rotation_angle)
+                    # Record augmentation
                     aug_transformation = aug_transformation @ \
                         transformation3d_with_translation(
                             transformation=pcd_rotation
                         )
-                    pcd_rotation_angle = np.arctan2(pcd_rotation[0,1], pcd_rotation[0,0])
-                    gt_boxes.rotate(-pcd_rotation_angle)
                 elif t == 'S':
                     pcd_scale_factor = input_dict['pcd_scale_factor']
+                    # Undo augmentation
+                    gt_boxes.scale(1/pcd_scale_factor)
+                    # Record augmentation
                     aug_transformation = aug_transformation @ \
                         transformation3d_with_translation(
                             transformation=np.identity(3)*pcd_scale_factor
                         )
-                    gt_boxes.scale(1/pcd_scale_factor)
                 elif t == 'T':
                     pcd_trans = input_dict['pcd_trans']
+                    # Undo augmentation
+                    gt_boxes.translate(-pcd_trans)
+                    # Record augmentation
                     aug_transformation = aug_transformation @ \
                         transformation3d_with_translation(
                             translation=pcd_trans
                         )
-                    gt_boxes.translate(-pcd_trans)
                 elif t == 'HF':
+                    # Undo augmentation
+                    gt_boxes.flip('horizontal')
+                    # Record augmentation
                     horizontal_flip = np.identity(4)
                     horizontal_flip[1,1] = -1
                     aug_transformation = aug_transformation @ horizontal_flip
-                    gt_boxes.flip('horizontal')
                 elif t == 'VF':
+                    # Undo augmentation
+                    gt_boxes.flip('vertical')
+                    # Record augmentation
                     vertical_flip = np.identity(4)
                     vertical_flip[0,0] = -1
                     aug_transformation = aug_transformation @ vertical_flip
-                    gt_boxes.flip('vertical')
 
-        # Get objects from dbsample augmentation
-        object_ids = agginfo['object_ids']
+        # Handle GT-sampling augmentation
+        object_ids = [id for id in agginfo['object_ids']]
         if 'dbsample_group_ids' in input_dict:
             object_ids += [
                 self.group_id2object_id[group_id] \
                 for group_id in input_dict['dbsample_group_ids']
             ]
 
-        # Shift box origin based on the aggregated point cloud format
-        gt_boxes = gt_boxes.tensor.numpy()
-        gt_boxes[:,:3] += self.box_origin_shift * gt_boxes[:,3:6]
-
         points_agg = load_aggregated_points(
             agg_dataset_path = self.agg_dataset_path,
-            scene_id = scene_id,
+            scene_id = agginfo['scene_id'],
             object_ids = object_ids,
-            gt_boxes = gt_boxes,
-            scene_transformation = scene_transformation,
+            gt_boxes = gt_boxes.tensor.numpy(),
+            scene_transformation = agginfo['scene_transformation'],
             num_point_features = self.num_point_features,
             use_point_features = self.use_point_features,
+            compression = self.compression,
             combine = True
         )
 
-        points_agg[:,:3] = transform3d(points_agg[:,:3], aug_transformation)
-        range_mask = points_agg[:,0] > self.point_cloud_range[0]
-        range_mask &= points_agg[:,0] < self.point_cloud_range[3]
-        range_mask &= points_agg[:,1] > self.point_cloud_range[1]
-        range_mask &= points_agg[:,1] < self.point_cloud_range[4]
-        range_mask &= points_agg[:,2] > self.point_cloud_range[2]
-        range_mask &= points_agg[:,2] < self.point_cloud_range[5]
-        points_agg = points_agg[range_mask]
+        if aug_transformation is not None:
+            points_agg[:,:3] = transform3d(points_agg[:,:3], aug_transformation)
+
+        if self.point_cloud_range is not None:
+            range_mask = points_agg[:,0] > self.point_cloud_range[0]
+            range_mask &= points_agg[:,0] < self.point_cloud_range[3]
+            range_mask &= points_agg[:,1] > self.point_cloud_range[1]
+            range_mask &= points_agg[:,1] < self.point_cloud_range[4]
+            range_mask &= points_agg[:,2] > self.point_cloud_range[2]
+            range_mask &= points_agg[:,2] < self.point_cloud_range[5]
+            points_agg = points_agg[range_mask]
 
         if self.load_format == 'numpy':
             input_dict[self.load_as] = points_agg
