@@ -10,10 +10,10 @@ from scipy.interpolate import BPoly
 from tqdm.autonotebook import tqdm
 
 from nuscenes.nuscenes import NuScenes
-from ..utils.transformations import (
+from ..utils.transforms import (
     transform3d, interpolate,
     transformation3d_with_translation,
-    transformation3d_from_quaternion_translation
+    transformation3d_from_quaternion
 )
 from .common import (
     extract_objects,
@@ -94,10 +94,10 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
             sd = nusc.get('sample_data', s['data']['LIDAR_TOP'])
             sensor2ego = nusc.get('calibrated_sensor', sd['calibrated_sensor_token'])
             ego2global = nusc.get('ego_pose', sd['ego_pose_token'])
-            lidar2global = transformation3d_from_quaternion_translation(
+            lidar2global = transformation3d_from_quaternion(
                 np.roll(ego2global['rotation'], -1),
                 ego2global['translation']
-            ) @ transformation3d_from_quaternion_translation(
+            ) @ transformation3d_from_quaternion(
                 np.roll(sensor2ego['rotation'], -1),
                 sensor2ego['translation']
             )
@@ -191,10 +191,10 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
             sd[sensor] = nusc.get('sample_data', sd_token[sensor])
             sensor2ego = nusc.get('calibrated_sensor', sd[sensor]['calibrated_sensor_token'])
             ego2global = nusc.get('ego_pose', sd[sensor]['ego_pose_token'])
-            sensor2global[sensor] = transformation3d_from_quaternion_translation(
+            sensor2global[sensor] = transformation3d_from_quaternion(
                 np.roll(ego2global['rotation'], -1),
                 ego2global['translation']
-            ) @ transformation3d_from_quaternion_translation(
+            ) @ transformation3d_from_quaternion(
                 np.roll(sensor2ego['rotation'], -1),
                 sensor2ego['translation']
             )

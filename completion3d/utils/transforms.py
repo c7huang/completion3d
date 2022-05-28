@@ -19,7 +19,7 @@ def cartesian_to_homogeneous(x: ArrayLike) -> np.ndarray:
     return np.concatenate([x, np.ones((x.shape[0], 1), dtype=x.dtype)], axis=1)
 
 
-def rotate2d(x: ArrayLike, angle: ArrayLike) -> np.ndarray:
+def rotate2d(x: ArrayLike, angle: float) -> np.ndarray:
     """Rotate an array of 2D points/vectors counterclockwise
 
     :param x: an (N, 2) array representing N 2D points/vectors
@@ -49,13 +49,21 @@ def transformation3d_with_translation(
     :returns: a 4x4 transformation matrix
     :rtype: np.ndarray
     """
-    transformation4x4 = np.identity(4)
-    transformation4x4[:3,:3] = np.asarray(transformation)
-    transformation4x4[:3,3] = np.asarray(translation)
+    transformation = np.asarray(transformation)
+    translation = np.asarray(translation)
+    if transformation.ndim == 3:
+        batch_size = transformation.shape[0]
+        transformation4x4 = np.tile(np.identity(4), (batch_size,1,1))
+        transformation4x4[:,:3,:3] = transformation
+        transformation4x4[:,:3,3] = translation
+    else:
+        transformation4x4 = np.identity(4)
+        transformation4x4[:3,:3] = transformation
+        transformation4x4[:3,3] = translation
     return transformation4x4
 
 
-def transformation3d_from_quaternion_translation(
+def transformation3d_from_quaternion(
     quaternion: ArrayLike, translation: ArrayLike = np.zeros(3)
 ) -> np.ndarray:
     """Compute a 3D transformation matrix (4x4) from a quaternion and
@@ -72,6 +80,13 @@ def transformation3d_from_quaternion_translation(
         R.from_quat(quaternion).as_matrix(), translation
     )
 
+def transformation3d_from_euler(
+    order: str, angles: ArrayLike, translation: ArrayLike = np.zeros(3)
+) -> np.ndarray:
+    return transformation3d_with_translation(
+        R.from_euler(order, angles).as_matrix(), translation
+    )
+
 
 def transform3d(x: ArrayLike, transformation: ArrayLike = np.identity(4)) -> np.ndarray:
     """Apply 3D transformation to an array of 3D points/vectors
@@ -83,7 +98,9 @@ def transform3d(x: ArrayLike, transformation: ArrayLike = np.identity(4)) -> np.
     :returns: an (N, 3) array with the points/vectors transformed
     :rtype: np.ndarray
     """
-    result = np.dot(cartesian_to_homogeneous(np.asarray(x)[:,:3]), transformation.T)
+    # result = np.dot(cartesian_to_homogeneous(np.asarray(x)[:,:3]), transformation.T)
+    result = transformation @ cartesian_to_homogeneous(np.asarray(x)[:,:3])[...,np.newaxis]
+    result = np.squeeze(result)
     return result[:,:3] / result[:,3:4]
 
 

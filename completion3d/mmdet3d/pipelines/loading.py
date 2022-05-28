@@ -10,7 +10,7 @@ except:
 from mmdet.datasets.builder import PIPELINES
 from mmdet3d.core import LiDARInstance3DBoxes, LiDARPoints
 from ...aggregation.common import load_aggregated_points
-from ...utils.transformations import transform3d, transformation3d_with_translation
+from ...utils.transforms import transform3d, transformation3d_with_translation
 
 
 @PIPELINES.register_module()
