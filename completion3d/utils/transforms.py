@@ -100,7 +100,7 @@ def transform3d(x: ArrayLike, transformation: ArrayLike = np.identity(4)) -> np.
     """
     # result = np.dot(cartesian_to_homogeneous(np.asarray(x)[:,:3]), transformation.T)
     result = transformation @ cartesian_to_homogeneous(np.asarray(x)[:,:3])[...,np.newaxis]
-    result = np.squeeze(result)
+    result = result[...,0]
     return result[:,:3] / result[:,3:4]
 
 
