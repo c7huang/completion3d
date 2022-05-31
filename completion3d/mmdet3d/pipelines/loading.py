@@ -23,11 +23,14 @@ class LoadAggregatedPoints(object):
     If any augmentation is applied (e.g., ObjectSample, GlobalRotScaleTrans,
     RandomFlip3D), they should be applied before this pipeline as well.
 
-    :param agg_dataset_path: the aggregated dataset location.
-        It needs to contain two folders: "scenes" and "objects".
-        Each folder contains the aggregated point clouds stored in bytes and can
-        be loaded into float32 numpy arrays.
-    :type agg_dataset_path: str
+    :param scene_path: the location containing the aggregated scene point
+        clouds. The point clouds are stored in bytes and can be loaded into
+        float32 numpy arrays.
+    :type scene_path: str
+    :param object_path: the location containing the aggregated object point
+        clouds. The point clouds are stored in bytes and can be loaded into
+        float32 numpy arrays.
+    :type object_path: str
     :param agginfos_path: the agginfos file generated using
         `completion3d.aggregation.xxx_aggregation`
     :type agginfos_path: str
@@ -61,7 +64,8 @@ class LoadAggregatedPoints(object):
 
     def __init__(
         self,
-        agg_dataset_path: str,  agginfos_path: str, dbinfos_path: str,
+        scene_path: str,  object_path: str,
+        agginfos_path: str, dbinfos_path: str,
         num_point_features: int,
         use_point_features: Union[ArrayLike, int, None] = None,
         box_origin: Optional[ArrayLike] = (0.5, 0.5, 0.0),
@@ -76,7 +80,8 @@ class LoadAggregatedPoints(object):
         elif use_point_features is None or not isinstance(use_point_features, (list, tuple, np.ndarray)):
             use_point_features = list(range(num_point_features))
 
-        self.agg_dataset_path = agg_dataset_path
+        self.scene_path = scene_path
+        self.object_path = object_path
 
         with open(dbinfos_path, 'rb') as f:
             dbinfos = pickle.load(f)
@@ -175,13 +180,16 @@ class LoadAggregatedPoints(object):
             ]
 
         points_agg = load_aggregated_points(
-            agg_dataset_path = self.agg_dataset_path,
+            scene_path = self.scene_path,
+            object_path = self.object_path,
             scene_id = agginfo['scene_id'],
             object_ids = object_ids,
-            gt_boxes = gt_boxes.tensor.numpy(),
-            scene_transformation = agginfo['scene_transformation'],
+            scene_transform = agginfo['scene_transform'],
+            object_transforms = gt_boxes.tensor.numpy()[:,[0,1,2,6]],
             num_point_features = self.num_point_features,
             use_point_features = self.use_point_features,
+            scene_chunks = agginfo['scene_chunks'],
+            point_cloud_range = None,
             compression = self.compression,
             combine = True
         )

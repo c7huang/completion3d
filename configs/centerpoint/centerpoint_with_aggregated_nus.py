@@ -57,9 +57,10 @@ db_sampler = dict(
         file_client_args=file_client_args))
 
 agg_loader = dict(
-    agg_dataset_path = f'{data_root}/nuscenes_agg',
-    dbinfos_path = f'{data_root}/nuscenes_dbinfos_train.pkl',
+    scene_path = f'{data_root}/nuscenes_agg/scenes',
+    object_path = f'{data_root}/nuscenes_agg/objects',
     agginfos_path = f'{data_root}/nuscenes_agg/nuscenes_agginfos_trainval.pkl',
+    dbinfos_path = f'{data_root}/nuscenes_dbinfos_train.pkl',
     num_point_features = 14,
     use_point_features = [0,1,2,-2,-1],
     box_origin = (0.5, 0.5, 0.5),
