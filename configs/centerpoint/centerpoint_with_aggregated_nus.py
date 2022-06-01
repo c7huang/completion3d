@@ -1,12 +1,5 @@
 _base_ = ['./centerpoint_0075voxel_second_secfpn_dcn_circlenms_4x8_cyclic_20e_nus.py']
 
-log_config = dict(
-    interval=1,
-    hooks=[
-        dict(type='TextLoggerHook'),
-        dict(type='TensorboardLoggerHook')
-    ])
-
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
@@ -15,6 +8,9 @@ class_names = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
+
+# Use non-deterministic voxelization for speed
+model = dict(pts_voxel_layer=dict(deterministic=False))
 
 dataset_type = 'NuScenesDataset'
 data_root = 'data/nuscenes/'
@@ -64,26 +60,33 @@ agg_loader = dict(
     num_point_features = 14,
     use_point_features = [0,1,2,-2,-1],
     box_origin = (0.5, 0.5, 0.5),
-    point_cloud_range = point_cloud_range,
+    point_cloud_range = None,
     compression = None,
     load_as = 'points',
-    load_format = 'mmdet3d'
+    load_format = 'mmdet3d',
+    verbose = False
 )
 
 train_pipeline = [
     dict(
-        type='LoadPointsFromFile',
+        type='LoadDummyPoints',
         coord_type='LIDAR',
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    dict(
-        type='LoadPointsFromMultiSweeps',
-        sweeps_num=9,
-        use_dim=[0, 1, 2, 3, 4],
-        file_client_args=file_client_args,
-        pad_empty_sweeps=True,
-        remove_close=True),
+    # dict(
+    #     type='LoadPointsFromFile',
+    #     coord_type='LIDAR',
+    #     load_dim=5,
+    #     use_dim=5,
+    #     file_client_args=file_client_args),
+    # dict(
+    #     type='LoadPointsFromMultiSweeps',
+    #     sweeps_num=9,
+    #     use_dim=[0, 1, 2, 3, 4],
+    #     file_client_args=file_client_args,
+    #     pad_empty_sweeps=True,
+    #     remove_close=True),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
     dict(type='ObjectSample', db_sampler=db_sampler),
     dict(

@@ -7,10 +7,22 @@ try:
     from numpy.typing import ArrayLike
 except:
     ArrayLike = Union[tuple, list, np.ndarray]
+from time import perf_counter
+from mmcv.utils import get_logger
 from mmdet.datasets.builder import PIPELINES
 from mmdet3d.core import LiDARInstance3DBoxes, LiDARPoints
+from mmdet3d.datasets.pipelines import LoadPointsFromFile
 from ...aggregation.common import load_aggregated_points
-from ...utils.transforms import transform3d, transformation3d_with_translation
+from ...utils.transforms import (
+    transform3d_affine,
+    transformation3d_with_translation
+)
+
+
+@PIPELINES.register_module()
+class LoadDummyPoints(LoadPointsFromFile):
+    def _load_points(self, pts_filename):
+        return np.zeros((0, self.load_dim), dtype=np.float32)
 
 
 @PIPELINES.register_module()
@@ -60,6 +72,7 @@ class LoadAggregatedPoints(object):
     :param load_format: the format the aggregated point cloud will be stored in
         the dictionary. Possible values are: numpy, tensor, mmdet3d
     :type load_format: str
+    :param verbose: print additional information
     """
 
     def __init__(
@@ -71,7 +84,8 @@ class LoadAggregatedPoints(object):
         box_origin: Optional[ArrayLike] = (0.5, 0.5, 0.0),
         point_cloud_range: Optional[ArrayLike] = None,
         compression: Union[bool, str, None] = None,
-        load_as: str = 'points_agg', load_format: str = 'mmdet3d'
+        load_as: str = 'points_agg', load_format: str = 'mmdet3d',
+        verbose: bool = False
     ):
         if box_origin is None:
             box_origin = torch.as_tensor([0.5, 0.5, 0.0], dtype=torch.float32)
@@ -97,6 +111,7 @@ class LoadAggregatedPoints(object):
         self.compression = compression
         self.load_as = load_as
         self.load_format = load_format
+        self.verbose = verbose
 
         self.group_id2object_id = {}
         for infos in dbinfos.values():
@@ -108,6 +123,8 @@ class LoadAggregatedPoints(object):
 
 
     def __call__(self, input_dict):
+        total_start = perf_counter()
+
         agginfo = self.agginfos[input_dict['sample_idx']]
         gt_boxes = input_dict['gt_bboxes_3d']
         gt_boxes = LiDARInstance3DBoxes(
@@ -189,22 +206,11 @@ class LoadAggregatedPoints(object):
             num_point_features = self.num_point_features,
             use_point_features = self.use_point_features,
             scene_chunks = agginfo['scene_chunks'],
-            point_cloud_range = None,
+            global_transform=aug_transformation,
+            point_cloud_range = self.point_cloud_range,
             compression = self.compression,
             combine = True
         )
-
-        if aug_transformation is not None:
-            points_agg[:,:3] = transform3d(points_agg[:,:3], aug_transformation)
-
-        if self.point_cloud_range is not None:
-            range_mask = points_agg[:,0] > self.point_cloud_range[0]
-            range_mask &= points_agg[:,0] < self.point_cloud_range[3]
-            range_mask &= points_agg[:,1] > self.point_cloud_range[1]
-            range_mask &= points_agg[:,1] < self.point_cloud_range[4]
-            range_mask &= points_agg[:,2] > self.point_cloud_range[2]
-            range_mask &= points_agg[:,2] < self.point_cloud_range[5]
-            points_agg = points_agg[range_mask]
 
         if self.load_format == 'numpy':
             input_dict[self.load_as] = points_agg
@@ -221,6 +227,12 @@ class LoadAggregatedPoints(object):
             )
         else:
             raise ValueError(f'unknown format {self.load_format}')
+        
+        total_time = perf_counter() - total_start
+        if self.verbose:
+            logger = get_logger('LoadAggregatedPoints')
+            logger.info(f'load time: {total_time:.2f}s')
+
 
         ########################################################################
         # DEBUG: plot and compare the point clouds after augmentation

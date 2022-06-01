@@ -9,7 +9,10 @@ except:
     ArrayLike = Union[tuple, list, np.ndarray]
 from sklearn.linear_model import RANSACRegressor
 from ..utils.box_np_ops import points_in_rbbox
-from ..utils.transforms import rotate2d, transform3d
+from ..utils.transforms import (
+    rotate2d, transform3d_affine,
+    transformation3d_from_euler
+)
 from ..utils.o3dutils import (
     incremental_icp, 
     voxel_grid_downsample,
@@ -154,7 +157,7 @@ def reconstruct_object(
         transformations = incremental_icp(points_list_icp, **icp_params)
 
         for i in range(len(transformations)):
-            points_list[i][:,:3] = transform3d(points_list[i][:,:3], transformations[i])
+            points_list[i][:,:3] = transform3d_affine(points_list[i][:,:3], transformations[i])
             # Apply any rotations to ray directions as well
             points_list[i][:,-3:] = np.dot(points_list[i][:,-3:], transformations[i][:3,:3].T)
 
@@ -216,7 +219,7 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
         points = np.concatenate([points, ranges, rays], axis=-1)
 
         # 1. Initial alignment with SLAM
-        points[:,:3] = transform3d(points[:,:3], lidar2global)
+        points[:,:3] = transform3d_affine(points[:,:3], lidar2global)
         points[:,-3:] = np.dot(points[:,-3:], lidar2global[:3,:3].T)
         points_list[i] = points
 
@@ -258,6 +261,19 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
     return points
 
 
+def filter_points_by_range(points, point_cloud_range=None):
+    if point_cloud_range is None:
+        return points
+    else:
+        range_mask = points[:,0] > point_cloud_range[0]
+        range_mask &= points[:,0] < point_cloud_range[3]
+        range_mask &= points[:,1] > point_cloud_range[1]
+        range_mask &= points[:,1] < point_cloud_range[4]
+        range_mask &= points[:,2] > point_cloud_range[2]
+        range_mask &= points[:,2] < point_cloud_range[5]
+        return points[range_mask]
+
+
 def load_aggregated_points(
     scene_path: str, object_path: str,
     scene_id: str, object_ids: ArrayLike,
@@ -265,6 +281,7 @@ def load_aggregated_points(
     num_point_features: int,
     use_point_features: Union[ArrayLike, int, None] = None,
     scene_chunks: Optional[ArrayLike] = None,
+    global_transform: Optional[ArrayLike] = None,
     point_cloud_range: Optional[ArrayLike] = None,
     compression: Union[bool, str, None] = None,
     combine: bool = True
@@ -297,6 +314,9 @@ def load_aggregated_points(
     :type use_point_features: ArrayLike | int | None, optional
     :param scene_chunks: _description_, defaults to None
     :type scene_chunks: ArrayLike | None, optional
+    :param global_transform: a global transformation that will be applied   
+        to the aggregated point cloud before clipping by range
+    :type global_transform: ArrayLike | None, optional
     :param point_cloud_range: the range of the point cloud in 
         `[x_min, y_min, z_min, x_max, y_max, z_max]` format.
         The points outside of this range will be discarded.
@@ -317,14 +337,19 @@ def load_aggregated_points(
         use_point_features = list(range(num_point_features))
     transform_normals = 3 in use_point_features or 4 in use_point_features or 5 in use_point_features
 
+    object_transforms = transformation3d_from_euler(
+        'z', -object_transforms[:,3], object_transforms[:,:3]
+    )
+    if global_transform is not None:
+        scene_transform = global_transform @ scene_transform
+        object_transforms = global_transform @ object_transforms
+
     # Load scene point cloud
     bg_points = []
     if scene_chunks is None:
-        scene_filenames = glob(f'{scene_path}/{scene_id}.bin.*')
-    elif isinstance(scene_chunks, (list, tuple)):
-        scene_filenames = [f'{scene_path}/{scene_id}.bin.{c}' for c in scene_chunks]
-    for scene_filename in scene_filenames:
-        with open(scene_filename, 'rb') as f:
+        scene_chunks = range(len(glob(f'{scene_path}/{scene_id}.bin.*')))
+    for c in scene_chunks:
+        with open(f'{scene_path}/{scene_id}.bin.{c}', 'rb') as f:
             if compression is None or compression is False:
                 data = f.read()
             elif compression == 'zlib':
@@ -336,19 +361,11 @@ def load_aggregated_points(
         )
     bg_points = np.concatenate(bg_points)
     # Transform background points
-    bg_points[:,:3] = transform3d(bg_points[:,:3], scene_transform)
+    bg_points[:,:3] = transform3d_affine(bg_points[:,:3], scene_transform)
     if transform_normals:
-        bg_points[:,3:6] = transform3d(bg_points[:,3:6], np.linalg.inv(scene_transform).T)
-    if point_cloud_range is not None:
-        bg_range_mask = bg_points[:,0] > point_cloud_range[0]
-        bg_range_mask &= bg_points[:,0] < point_cloud_range[3]
-        bg_range_mask &= bg_points[:,1] > point_cloud_range[1]
-        bg_range_mask &= bg_points[:,1] < point_cloud_range[4]
-        bg_range_mask &= bg_points[:,2] > point_cloud_range[2]
-        bg_range_mask &= bg_points[:,2] < point_cloud_range[5]
-        bg_points = bg_points[bg_range_mask][:,use_point_features]
-    else:
-        bg_points = bg_points[:,use_point_features]
+        bg_points[:,3:6] = transform3d_affine(bg_points[:,3:6], np.linalg.inv(scene_transform).T)
+    if not combine:
+        bg_points = filter_points_by_range(bg_points, point_cloud_range)[:,use_point_features]
 
     # Load object point clouds
     obj_points = {}
@@ -360,23 +377,18 @@ def load_aggregated_points(
                 data = zlib.decompress(f.read())
             else:
                 raise ValueError(f'unsupported compression algorithm: {compression}')
-        obj_points[obj_id] = np.frombuffer(data, dtype=np.float32).reshape(-1, num_point_features).copy()
-        obj_points[obj_id][:,:2] = rotate2d(obj_points[obj_id][:,:2], -obj_transform[3])
+        obj_points_i = np.frombuffer(data, dtype=np.float32).reshape(-1, num_point_features).copy()
+        obj_points_i[:,:3] = transform3d_affine(obj_points_i[:,:3], obj_transform)
         if transform_normals:
-            obj_points[obj_id][:,3:5] = rotate2d(obj_points[obj_id][:,3:5], -obj_transform[3])
-        obj_points[obj_id][:,:3] += obj_transform[:3]
-        if point_cloud_range is not None:
-            obj_range_mask = obj_points[obj_id][:,0] > point_cloud_range[0]
-            obj_range_mask &= obj_points[obj_id][:,0] < point_cloud_range[3]
-            obj_range_mask &= obj_points[obj_id][:,1] > point_cloud_range[1]
-            obj_range_mask &= obj_points[obj_id][:,1] < point_cloud_range[4]
-            obj_range_mask &= obj_points[obj_id][:,2] > point_cloud_range[2]
-            obj_range_mask &= obj_points[obj_id][:,2] < point_cloud_range[5]
-            obj_points[obj_id] = obj_points[obj_id][obj_range_mask][:,use_point_features]
-        else:
-            obj_points[obj_id] = obj_points[obj_id][:,use_point_features]
+            obj_points_i[:,3:6] = transform3d_affine(obj_points_i[:,3:6], np.linalg.inv(obj_transform).T)
+        if not combine:
+            obj_points_i = filter_points_by_range(obj_points_i, point_cloud_range)[:,use_point_features]
+        obj_points[obj_id] = obj_points_i
 
     if combine:
-        return np.concatenate([bg_points, *list(obj_points.values())])
+        return filter_points_by_range(
+            np.concatenate([bg_points, *list(obj_points.values())]),
+            point_cloud_range
+        )[:,use_point_features]
     else:
         return bg_points, obj_points

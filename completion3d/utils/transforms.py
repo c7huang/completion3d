@@ -18,7 +18,6 @@ def cartesian_to_homogeneous(x: ArrayLike) -> np.ndarray:
     x = np.asarray(x)
     return np.concatenate([x, np.ones((x.shape[0], 1), dtype=x.dtype)], axis=1)
 
-
 def rotate2d(x: ArrayLike, angle: float) -> np.ndarray:
     """Rotate an array of 2D points/vectors counterclockwise
 
@@ -88,21 +87,31 @@ def transformation3d_from_euler(
     )
 
 
-def transform3d(x: ArrayLike, transformation: ArrayLike = np.identity(4)) -> np.ndarray:
+def transform3d_proj(x: ArrayLike, T: ArrayLike = np.identity(4)) -> np.ndarray:
+    result = np.asarray(T) @ cartesian_to_homogeneous(np.asarray(x)[:,:3])[...,np.newaxis]
+    result = result[...,0]
+    return result[:,:3] / result[:,3:4]
+
+
+def transform3d_affine(x: ArrayLike, T: ArrayLike = np.zeros(4)):
+    return (T[:3,:3] @ np.asarray(x)[:,:3,np.newaxis])[...,0] + T[:3,3]
+
+
+def transform3d(x: ArrayLike, T: ArrayLike = np.identity(4)) -> np.ndarray:
     """Apply 3D transformation to an array of 3D points/vectors
     
     :param x: an (N, 3) array representing N 3D points/vectors
     :type x: array_like
-    :param transformation: a 4x4 transformation matrix
-    :type transformation: array_like
+    :param T: a 4x4 transformation matrix
+    :type T: array_like
     :returns: an (N, 3) array with the points/vectors transformed
     :rtype: np.ndarray
     """
-    # result = np.dot(cartesian_to_homogeneous(np.asarray(x)[:,:3]), transformation.T)
-    result = transformation @ cartesian_to_homogeneous(np.asarray(x)[:,:3])[...,np.newaxis]
-    result = result[...,0]
-    return result[:,:3] / result[:,3:4]
-
+    T = np.asarray(T)
+    if T.ndim == 2 and np.all(T[3,:] == np.array([0,0,0,1])):
+        return transform3d_affine(x, T)
+    else:
+        return transform3d_matmul(x, T)
 
 def interpolate(image: ArrayLike, points: ArrayLike, method: str ='linear') -> np.ndarray:
     return interpn( 
