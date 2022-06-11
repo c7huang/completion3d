@@ -30,23 +30,23 @@ def to_numpy(pcd, use_dim=6):
         ).astype(np.float32)[:,:use_dim]
 
 
-def radius_outlier_removal(points, nb_points, radius, print_progress=False):
+def radius_outlier_removal(points, nb_points, radius, print_progress=False, return_indices=False):
     pcd = PointCloud(points)
     pcd, ind = pcd.remove_radius_outlier(nb_points, radius, print_progress)
     if isinstance(points, o3d.geometry.PointCloud):
-        return pcd
+        return pcd, ind if return_indices else pcd
     else:
-        return points[ind]
+        return points[ind], ind if return_indices else points[ind]
 ror = radius_outlier_removal
 
 
-def statistical_outlier_removal(points, nb_neighbors, std_ratio, print_progress=False):
+def statistical_outlier_removal(points, nb_neighbors, std_ratio, print_progress=False, return_indices=False):
     pcd = PointCloud(points)
     pcd, ind = pcd.remove_statistical_outlier(nb_neighbors, std_ratio, print_progress)
     if isinstance(points, o3d.geometry.PointCloud):
-        return pcd
+        return pcd, ind if return_indices else pcd
     else:
-        return points[ind]
+        return points[ind], ind if return_indices else points[ind]
 sor = statistical_outlier_removal
 
 
@@ -125,6 +125,9 @@ def iterative_closest_point(
     ############################################################################
     # Check arguments
     ############################################################################
+    source = PointCloud(source)
+    target = PointCloud(target)
+
     if method == 'point_to_point':
         registration_icp = o3d.pipelines.registration.registration_icp
         estimation_method = o3d.pipelines.registration.TransformationEstimationPointToPoint()
