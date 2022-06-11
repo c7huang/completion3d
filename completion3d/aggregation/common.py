@@ -10,8 +10,7 @@ except:
 from sklearn.linear_model import RANSACRegressor
 from ..utils.box_np_ops import points_in_rbbox
 from ..utils.transforms import (
-    rotate2d, transform3d_affine,
-    transformation3d_from_euler
+    rotate2d, affine_transform, apply_transform,
 )
 from ..utils.o3dutils import (
     incremental_icp, 
@@ -154,12 +153,12 @@ def reconstruct_object(
             points_list_icp.append(points_i)
         
         # Compute ICP transformations
-        transformations = incremental_icp(points_list_icp, **icp_params)
+        transforms = incremental_icp(points_list_icp, **icp_params)
 
-        for i in range(len(transformations)):
-            points_list[i][:,:3] = transform3d_affine(points_list[i][:,:3], transformations[i])
+        for i in range(len(transforms)):
+            points_list[i][:,:3] = apply_transform(transforms[i], points_list[i][:,:3])
             # Apply any rotations to ray directions as well
-            points_list[i][:,-3:] = np.dot(points_list[i][:,-3:], transformations[i][:3,:3].T)
+            points_list[i][:,-3:] = np.dot(points_list[i][:,-3:], transforms[i][:3,:3].T)
 
     # Concatenate points
     points = np.concatenate(points_list)
@@ -219,7 +218,7 @@ def reconstruct_scene(points_list: List[ArrayLike], lidar2global_list: ArrayLike
         points = np.concatenate([points, ranges, rays], axis=-1)
 
         # 1. Initial alignment with SLAM
-        points[:,:3] = transform3d_affine(points[:,:3], lidar2global)
+        points[:,:3] = apply_transform(lidar2global, points[:,:3])
         points[:,-3:] = np.dot(points[:,-3:], lidar2global[:3,:3].T)
         points_list[i] = points
 
@@ -337,8 +336,10 @@ def load_aggregated_points(
         use_point_features = list(range(num_point_features))
     transform_normals = 3 in use_point_features or 4 in use_point_features or 5 in use_point_features
 
-    object_transforms = transformation3d_from_euler(
-        'z', -object_transforms[:,3], object_transforms[:,:3]
+    object_transforms = affine_transform(
+        rotation=('z', -object_transforms[:,3]),
+        rotation_format='euler',
+        translation=object_transforms[:,:3]
     )
     if global_transform is not None:
         scene_transform = global_transform @ scene_transform
@@ -361,9 +362,9 @@ def load_aggregated_points(
         )
     bg_points = np.concatenate(bg_points)
     # Transform background points
-    bg_points[:,:3] = transform3d_affine(bg_points[:,:3], scene_transform)
+    bg_points[:,:3] = apply_transform(scene_transform, bg_points[:,:3])
     if transform_normals:
-        bg_points[:,3:6] = transform3d_affine(bg_points[:,3:6], np.linalg.inv(scene_transform).T)
+        bg_points[:,3:6] = apply_transform(np.linalg.inv(scene_transform).T, bg_points[:,3:6])
     if not combine:
         bg_points = filter_points_by_range(bg_points, point_cloud_range)[:,use_point_features]
 
@@ -378,9 +379,9 @@ def load_aggregated_points(
             else:
                 raise ValueError(f'unsupported compression algorithm: {compression}')
         obj_points_i = np.frombuffer(data, dtype=np.float32).reshape(-1, num_point_features).copy()
-        obj_points_i[:,:3] = transform3d_affine(obj_points_i[:,:3], obj_transform)
+        obj_points_i[:,:3] = apply_transform(obj_transform, obj_points_i[:,:3])
         if transform_normals:
-            obj_points_i[:,3:6] = transform3d_affine(obj_points_i[:,3:6], np.linalg.inv(obj_transform).T)
+            obj_points_i[:,3:6] = apply_transform(np.linalg.inv(obj_transform).T, obj_points_i[:,3:6])
         if not combine:
             obj_points_i = filter_points_by_range(obj_points_i, point_cloud_range)[:,use_point_features]
         obj_points[obj_id] = obj_points_i

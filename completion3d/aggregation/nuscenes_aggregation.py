@@ -7,13 +7,12 @@ import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree as KDTree
 from scipy.interpolate import BPoly
+from skimage.transform import SimilarityTransform, ProjectiveTransform, warp
 from tqdm.autonotebook import tqdm
 
 from nuscenes.nuscenes import NuScenes
 from ..utils.transforms import (
-    transform3d, interpolate,
-    transformation3d_with_translation,
-    transformation3d_from_quaternion
+    rotate2d, affine_transform, apply_transform, interpolate,
 )
 from .common import (
     extract_objects,
@@ -39,13 +38,13 @@ def convert_nuscenes_boxes(boxes):
     rots = np.array([b.orientation.yaw_pitch_roll[0]
                         for b in boxes]).reshape(-1, 1)
     return np.concatenate([locs, dims, -rots - np.pi / 2], axis=1)
-    
+
 
 def points_rgb_from_image(points, image, lidar2cam=np.identity(4)):
     image = np.swapaxes(image, 0, 1)
 
     # 1. Transform points to camera frame
-    points_cam = transform3d(points, lidar2cam)
+    points_cam = apply_transform(lidar2cam, points)
     points_cam[:,:2] = points_cam[:,:2] / points_cam[:,2:3]
 
     # 2. Filter out-of-bound points
@@ -94,12 +93,14 @@ def get_nuscenes_aggregation_infos( nusc: NuScenes ) -> dict:
             sd = nusc.get('sample_data', s['data']['LIDAR_TOP'])
             sensor2ego = nusc.get('calibrated_sensor', sd['calibrated_sensor_token'])
             ego2global = nusc.get('ego_pose', sd['ego_pose_token'])
-            lidar2global = transformation3d_from_quaternion(
-                np.roll(ego2global['rotation'], -1),
-                ego2global['translation']
-            ) @ transformation3d_from_quaternion(
-                np.roll(sensor2ego['rotation'], -1),
-                sensor2ego['translation']
+            lidar2global = affine_transform(
+                rotation=np.roll(ego2global['rotation'], -1),
+                rotation_format='quat',
+                translation=ego2global['translation']
+            ) @ affine_transform(
+                rotation=np.roll(sensor2ego['rotation'], -1),
+                rotation_format='quat',
+                translation=sensor2ego['translation']
             )
             global2lidar = np.linalg.inv(lidar2global).astype(np.float32)
 
@@ -191,12 +192,14 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
             sd[sensor] = nusc.get('sample_data', sd_token[sensor])
             sensor2ego = nusc.get('calibrated_sensor', sd[sensor]['calibrated_sensor_token'])
             ego2global = nusc.get('ego_pose', sd[sensor]['ego_pose_token'])
-            sensor2global[sensor] = transformation3d_from_quaternion(
-                np.roll(ego2global['rotation'], -1),
-                ego2global['translation']
-            ) @ transformation3d_from_quaternion(
-                np.roll(sensor2ego['rotation'], -1),
-                sensor2ego['translation']
+            sensor2global[sensor] = affine_transform(
+                rotation=np.roll(ego2global['rotation'], -1),
+                rotation_format='quat',
+                translation=ego2global['translation']
+            ) @ affine_transform(
+                rotation=np.roll(sensor2ego['rotation'], -1),
+                rotation_format='quat',
+                translation=sensor2ego['translation']
             )
             sensor2global[sensor] = sensor2global[sensor].astype(np.float32)
             global2sensor[sensor] = np.linalg.inv(sensor2global[sensor])
@@ -316,7 +319,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
         # (since the interpolation has to be done in the global coordinate)
         ########################################################################
         for instance_token, box in boxes.items():
-            box[:3] = transform3d(box[np.newaxis,:3], global2sensor['LIDAR_TOP'])[0]
+            box[:3] = apply_transform(global2sensor['LIDAR_TOP'], box[np.newaxis,:3])[0]
             if instance_token not in obj_boxes:
                 obj_boxes[instance_token] = []
             obj_boxes[instance_token].append(box)
@@ -346,9 +349,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
 
             # Extract rgb features from image
             # https://github.com/nutonomy/nuscenes-devkit/blob/master/python-sdk/nuscenes/nuscenes.py#L834
-            lidar2cam = transformation3d_with_translation(
-                    cam_intrinsic[cam]
-                ) @ global2sensor[cam] @ sensor2global['LIDAR_TOP']
+            lidar2cam = affine_transform(cam_intrinsic[cam]) @ global2sensor[cam] @ sensor2global['LIDAR_TOP']
             points_rgb_i, valid_rgb_mask_i = points_rgb_from_image(points, image[cam], lidar2cam)
 
             # Record rgb features and number of images the points are observed in
@@ -371,7 +372,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
             # then we assign the label based on nearest points
             points_labels = np.zeros((points.shape[0], 1), dtype=np.uint8)
             _, ind = KDTree(points_prev[:,:3]).query(
-                transform3d(points[:,:3], sensor2global['LIDAR_TOP']),
+                apply_transform(sensor2global['LIDAR_TOP'], points[:,:3]),
                 k=1, distance_upper_bound=1, workers=-1
             )
             valid = ind < points_prev.shape[0]
@@ -379,7 +380,7 @@ def aggregate_nuscenes_sequence( nusc, scene_idx, output_path=None ):
 
         points = np.concatenate([points, points_rgb, points_labels], axis=-1)
         points_prev = points.copy()
-        points_prev[:,:3] = transform3d(points_prev[:,:3], sensor2global['LIDAR_TOP'])
+        points_prev[:,:3] = apply_transform(sensor2global['LIDAR_TOP'], points_prev[:,:3])
 
         # Remove noisy points and points on ego vehicle
         points = points[(points[:,-1] >= 1) & (points[:,-1] <= 30)]

@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 try:
     from numpy.typing import ArrayLike
@@ -7,16 +8,6 @@ except:
 from scipy.spatial.transform import Rotation as R
 from scipy.interpolate import interpn
 
-def cartesian_to_homogeneous(x: ArrayLike) -> np.ndarray:
-    """Convert K-dimensional points/vectors to homoveneous coordinates
-
-    :param x: a (N, K) array representing N K-dimensional points/vectors
-    :type x: array_like
-    :returns: a (N, K+1) array in homogeneous coordinates
-    :rtype: np.ndarray
-    """
-    x = np.asarray(x)
-    return np.concatenate([x, np.ones((x.shape[0], 1), dtype=x.dtype)], axis=1)
 
 def rotate2d(x: ArrayLike, angle: float) -> np.ndarray:
     """Rotate an array of 2D points/vectors counterclockwise
@@ -34,84 +25,82 @@ def rotate2d(x: ArrayLike, angle: float) -> np.ndarray:
     return np.dot(np.asarray(x)[:,:2], rot.T)
 
 
-def transformation3d_with_translation(
-    transformation: ArrayLike = np.identity(3),
-    translation: ArrayLike = np.zeros(3)
+def affine_transform(
+    matrix: ArrayLike = None,
+    scale: ArrayLike = None,
+    rotation: Any = None,
+    rotation_format: str = 'quat',
+    translation: ArrayLike = None,
+    dim=3
 ) -> np.ndarray: 
-    """Compute a 3d transformation matrix (4x4) from a 3x3 transformation matrix
-    and translation vector.
+    # TODO: update docstring
+    # TODO: add error checking and prompts
 
-    :param transformation: a 3x3 rotation matrix
-    :type transformation: array_like
-    :param translation: translation vector
-    :type translation: array_like
-    :returns: a 4x4 transformation matrix
-    :rtype: np.ndarray
-    """
-    transformation = np.asarray(transformation)
-    translation = np.asarray(translation)
-    if transformation.ndim == 3:
-        batch_size = transformation.shape[0]
-        transformation4x4 = np.tile(np.identity(4), (batch_size,1,1))
-        transformation4x4[:,:3,:3] = transformation
-        transformation4x4[:,:3,3] = translation
+    batch_size = 0
+
+    if matrix is None:
+        matrix = np.eye(dim)
     else:
-        transformation4x4 = np.identity(4)
-        transformation4x4[:3,:3] = transformation
-        transformation4x4[:3,3] = translation
-    return transformation4x4
-
-
-def transformation3d_from_quaternion(
-    quaternion: ArrayLike, translation: ArrayLike = np.zeros(3)
-) -> np.ndarray:
-    """Compute a 3D transformation matrix (4x4) from a quaternion and
-    translation vector.
-
-    :param quaternion: a quaternion in (x, y, z, w) format
-    :type quaternion: array_like
-    :param translation: translation vector
-    :type translation: array_like
-    :returns: a 4x4 transformation matrix
-    :rtype: np.ndarray
-    """
-    return transformation3d_with_translation(
-        R.from_quat(quaternion).as_matrix(), translation
-    )
-
-def transformation3d_from_euler(
-    order: str, angles: ArrayLike, translation: ArrayLike = np.zeros(3)
-) -> np.ndarray:
-    return transformation3d_with_translation(
-        R.from_euler(order, angles).as_matrix(), translation
-    )
-
-
-def transform3d_proj(x: ArrayLike, T: ArrayLike = np.identity(4)) -> np.ndarray:
-    result = np.asarray(T) @ cartesian_to_homogeneous(np.asarray(x)[:,:3])[...,np.newaxis]
-    result = result[...,0]
-    return result[:,:3] / result[:,3:4]
-
-
-def transform3d_affine(x: ArrayLike, T: ArrayLike = np.zeros(4)):
-    return (T[:3,:3] @ np.asarray(x)[:,:3,np.newaxis])[...,0] + T[:3,3]
-
-
-def transform3d(x: ArrayLike, T: ArrayLike = np.identity(4)) -> np.ndarray:
-    """Apply 3D transformation to an array of 3D points/vectors
+        matrix = np.asarray(matrix)
+        if batch_size == 0 and matrix.ndim == 3:
+            batch_size = matrix.shape[0]
     
-    :param x: an (N, 3) array representing N 3D points/vectors
-    :type x: array_like
-    :param T: a 4x4 transformation matrix
-    :type T: array_like
-    :returns: an (N, 3) array with the points/vectors transformed
-    :rtype: np.ndarray
-    """
-    T = np.asarray(T)
-    if T.ndim == 2 and np.all(T[3,:] == np.array([0,0,0,1])):
-        return transform3d_affine(x, T)
+    if scale is not None:
+        scale = np.asarray(scale)
+        scale_mat = np.eye(dim)
+        if batch_size == 0 and scale.ndim == 2:
+            batch_size = scale.shape[0]
+            scale_mat = np.tile(scale_mat, (batch_size,1,1))
+        scale_mat[...,np.arange(dim),np.arange(dim)] *= scale
+        matrix = scale_mat @ matrix
+
+    if rotation is not None:
+        if dim == 2:
+            rotmat = R.from_euler('z', rotation).as_matrix()[...,:2,:2]
+        elif dim == 3:
+            if rotation_format == 'quat':
+                rotmat = R.from_quat(rotation).as_matrix()
+            elif rotation_format == 'euler':
+                rotmat = R.from_euler(*rotation).as_matrix()
+            elif rotation_format == 'rotvec':
+                rotmat = R.from_rotvec(rotation).as_matrix()
+            elif rotation_format == 'rotmat':
+                rotmat = np.asarray(rotation)
+            else:
+                raise ValueError(f'invalid 3D rotation format {rotation_format}')
+        elif dim > 3:
+            if rotation_format == 'rotmat':
+                rotmat = np.asarray(rotation)
+            else:
+                raise ValueError(f'invalid {dim}D rotation format {rotation_format}')
+        if batch_size == 0 and rotmat.ndim == 3:
+            batch_size = rotmat.shape[0]
+        matrix = rotmat @ matrix
+
+    if translation is None:
+        translation = np.zeros(dim)
     else:
-        return transform3d_matmul(x, T)
+        translation = np.asarray(translation)
+        if batch_size == 0 and translation.ndim == 2:
+            batch_size = translation.shape[0]
+    
+    # Construct homogeneous transformation matrix
+    hmat = np.eye(dim+1)
+    if batch_size > 0:
+        hmat = np.tile(hmat, (batch_size,1,1))
+    hmat[...,:dim,:dim] = matrix
+    hmat[...,:dim,dim] = translation
+    return hmat
+
+
+def apply_transform(hmat: ArrayLike, x: ArrayLike) -> np.ndarray:
+    # TODO: update docstring
+
+    hmat = np.asarray(hmat)
+    x = np.asarray(x)
+    return ((hmat[...,:3,:3] @ x[...,:3,None])[...,0] + hmat[...,:3,3]) / \
+        (np.sum(hmat[...,3,:3]*x, axis=-1) + hmat[...,3,3])[...,None]
+
 
 def interpolate(image: ArrayLike, points: ArrayLike, method: str ='linear') -> np.ndarray:
     return interpn( 

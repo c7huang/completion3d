@@ -13,10 +13,7 @@ from mmdet.datasets.builder import PIPELINES
 from mmdet3d.core import LiDARInstance3DBoxes, LiDARPoints
 from mmdet3d.datasets.pipelines import LoadPointsFromFile
 from ...aggregation.common import load_aggregated_points
-from ...utils.transforms import (
-    transform3d_affine,
-    transformation3d_with_translation
-)
+from ...utils.transforms import affine_transform
 
 
 @PIPELINES.register_module()
@@ -152,7 +149,7 @@ class LoadAggregatedPoints(object):
                     gt_boxes.rotate(-pcd_rotation_angle)
                     # Record augmentation
                     aug_transformation = aug_transformation @ \
-                        transformation3d_with_translation(
+                        affine_transform(
                             transformation=pcd_rotation
                         )
                 elif t == 'S':
@@ -161,7 +158,7 @@ class LoadAggregatedPoints(object):
                     gt_boxes.scale(1/pcd_scale_factor)
                     # Record augmentation
                     aug_transformation = aug_transformation @ \
-                        transformation3d_with_translation(
+                        affine_transform(
                             transformation=np.identity(3)*pcd_scale_factor
                         )
                 elif t == 'T':
@@ -170,7 +167,7 @@ class LoadAggregatedPoints(object):
                     gt_boxes.translate(-pcd_trans)
                     # Record augmentation
                     aug_transformation = aug_transformation @ \
-                        transformation3d_with_translation(
+                        affine_transform(
                             translation=pcd_trans
                         )
                 elif t == 'HF':
