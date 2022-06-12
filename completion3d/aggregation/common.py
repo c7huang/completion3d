@@ -336,14 +336,8 @@ def load_aggregated_points(
         use_point_features = list(range(num_point_features))
     transform_normals = 3 in use_point_features or 4 in use_point_features or 5 in use_point_features
 
-    object_transforms = affine_transform(
-        rotation=('z', -object_transforms[:,3]),
-        rotation_format='euler',
-        translation=object_transforms[:,:3]
-    )
     if global_transform is not None:
         scene_transform = global_transform @ scene_transform
-        object_transforms = global_transform @ object_transforms
 
     # Load scene point cloud
     bg_points = []
@@ -370,21 +364,33 @@ def load_aggregated_points(
 
     # Load object point clouds
     obj_points = {}
-    for obj_id, obj_transform in zip(object_ids, object_transforms):
-        with open(f'{object_path}/{obj_id}.bin', 'rb') as f:
-            if compression is None or compression is False:
-                data = f.read()
-            elif compression == 'zlib':
-                data = zlib.decompress(f.read())
-            else:
-                raise ValueError(f'unsupported compression algorithm: {compression}')
-        obj_points_i = np.frombuffer(data, dtype=np.float32).reshape(-1, num_point_features).copy()
-        obj_points_i[:,:3] = apply_transform(obj_transform, obj_points_i[:,:3])
-        if transform_normals:
-            obj_points_i[:,3:6] = apply_transform(np.linalg.inv(obj_transform).T, obj_points_i[:,3:6])
-        if not combine:
-            obj_points_i = filter_points_by_range(obj_points_i, point_cloud_range)[:,use_point_features]
-        obj_points[obj_id] = obj_points_i
+    if (len(object_ids) != len(object_transforms)):
+        print(object_ids)
+        print(object_transforms)
+    assert(len(object_ids) == len(object_transforms))
+    if len(object_ids) > 0:
+        object_transforms = affine_transform(
+            rotation=('z', -object_transforms[:,3]),
+            rotation_format='euler',
+            translation=object_transforms[:,:3]
+        )
+        if global_transform is not None:
+            object_transforms = global_transform @ object_transforms
+        for obj_id, obj_transform in zip(object_ids, object_transforms):
+            with open(f'{object_path}/{obj_id}.bin', 'rb') as f:
+                if compression is None or compression is False:
+                    data = f.read()
+                elif compression == 'zlib':
+                    data = zlib.decompress(f.read())
+                else:
+                    raise ValueError(f'unsupported compression algorithm: {compression}')
+            obj_points_i = np.frombuffer(data, dtype=np.float32).reshape(-1, num_point_features).copy()
+            obj_points_i[:,:3] = apply_transform(obj_transform, obj_points_i[:,:3])
+            if transform_normals:
+                obj_points_i[:,3:6] = apply_transform(np.linalg.inv(obj_transform).T, obj_points_i[:,3:6])
+            if not combine:
+                obj_points_i = filter_points_by_range(obj_points_i, point_cloud_range)[:,use_point_features]
+            obj_points[obj_id] = obj_points_i
 
     if combine:
         return filter_points_by_range(
