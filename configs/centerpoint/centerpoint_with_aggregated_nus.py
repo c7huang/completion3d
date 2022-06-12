@@ -74,19 +74,6 @@ train_pipeline = [
         load_dim=5,
         use_dim=5,
         file_client_args=file_client_args),
-    # dict(
-    #     type='LoadPointsFromFile',
-    #     coord_type='LIDAR',
-    #     load_dim=5,
-    #     use_dim=5,
-    #     file_client_args=file_client_args),
-    # dict(
-    #     type='LoadPointsFromMultiSweeps',
-    #     sweeps_num=9,
-    #     use_dim=[0, 1, 2, 3, 4],
-    #     file_client_args=file_client_args,
-    #     pad_empty_sweeps=True,
-    #     remove_close=True),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
     dict(type='ObjectSample', db_sampler=db_sampler),
     dict(
@@ -107,20 +94,11 @@ train_pipeline = [
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d'])
 ]
+
 test_pipeline = [
-    dict(
-        type='LoadPointsFromFile',
-        coord_type='LIDAR',
-        load_dim=5,
-        use_dim=5,
-        file_client_args=file_client_args),
-    dict(
-        type='LoadPointsFromMultiSweeps',
-        sweeps_num=9,
-        use_dim=[0, 1, 2, 3, 4],
-        file_client_args=file_client_args,
-        pad_empty_sweeps=True,
-        remove_close=True),
+    dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
+    dict(type='LoadAggregatedPoints', **agg_loader),
+    dict(type='UnloadAnnotations3D'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
@@ -142,28 +120,6 @@ test_pipeline = [
             dict(type='Collect3D', keys=['points'])
         ])
 ]
-# construct a pipeline for data and gt loading in show function
-# please keep its loading function consistent with test_pipeline (e.g. client)
-eval_pipeline = [
-    dict(
-        type='LoadPointsFromFile',
-        coord_type='LIDAR',
-        load_dim=5,
-        use_dim=5,
-        file_client_args=file_client_args),
-    dict(
-        type='LoadPointsFromMultiSweeps',
-        sweeps_num=9,
-        use_dim=[0, 1, 2, 3, 4],
-        file_client_args=file_client_args,
-        pad_empty_sweeps=True,
-        remove_close=True),
-    dict(
-        type='DefaultFormatBundle3D',
-        class_names=class_names,
-        with_label=False),
-    dict(type='Collect3D', keys=['points'])
-]
 
 data = dict(
     samples_per_gpu=4,
@@ -181,7 +137,15 @@ data = dict(
             # we use box_type_3d='LiDAR' in kitti and nuscenes dataset
             # and box_type_3d='Depth' in sunrgbd and scannet dataset.
             box_type_3d='LiDAR')),
-    val=dict(pipeline=test_pipeline, classes=class_names),
-    test=dict(pipeline=test_pipeline, classes=class_names))
-
-evaluation = dict(interval=20, pipeline=eval_pipeline)
+    val=dict(
+        pipeline=test_pipeline,
+        classes=class_names,
+        filter_empty_gt=False,
+        test_mode=False,
+    ),
+    test=dict(
+        pipeline=test_pipeline,
+        classes=class_names,
+        filter_empty_gt=False,
+        test_mode=False,
+    ))

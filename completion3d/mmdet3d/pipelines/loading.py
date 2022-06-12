@@ -23,6 +23,31 @@ class LoadDummyPoints(LoadPointsFromFile):
 
 
 @PIPELINES.register_module()
+class UnloadAnnotations3D(object):
+    ann_fields = [
+        'img_info', 'ann_info',
+        'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels',
+        'gt_masks', 'gt_semantic_seg',
+        'gt_bboxes_3d', 'centers2d', 'depths',
+        'gt_labels_3d', 'attr_labels',
+        'pts_instance_mask', 'pts_semantic_mask'
+    ]
+
+    meta_fields = [
+        'bbox_fields', 'mask_fields', 'seg_fields',
+        'bbox3d_fields', 'pts_mask_fields', 'pts_seg_fields'
+    ]
+
+    def __call__(self, results):
+        for key in self.ann_fields:
+            if key in results:
+                del results[key]
+        for key in self.meta_fields:
+            results[key] = []
+        return results
+
+
+@PIPELINES.register_module()
 class LoadAggregatedPoints(object):
     """Load the aggregated version of the point cloud for the current frame.
 
