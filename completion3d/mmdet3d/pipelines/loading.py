@@ -17,12 +17,6 @@ from ...utils.transforms import affine_transform
 
 
 @PIPELINES.register_module()
-class LoadDummyPoints(LoadPointsFromFile):
-    def _load_points(self, pts_filename):
-        return np.zeros((0, self.load_dim), dtype=np.float32)
-
-
-@PIPELINES.register_module()
 class UnloadAnnotations3D(object):
     ann_fields = [
         'img_info', 'ann_info',
@@ -45,6 +39,25 @@ class UnloadAnnotations3D(object):
         for key in self.meta_fields:
             results[key] = []
         return results
+
+
+@PIPELINES.register_module()
+class RemapLabels(object):
+    def __init__(self, label_map, label_key='gt_labels_3d'):
+        self.label_key = label_key
+        self.label_map = label_map
+
+    def __call__(self, results):
+        results[self.label_key] = np.array([
+            self.label_map[label] for label in results[self.label_key]
+        ], dtype=results[self.label_key].dtype)
+        return results
+
+
+@PIPELINES.register_module()
+class LoadDummyPoints(LoadPointsFromFile):
+    def _load_points(self, pts_filename):
+        return np.zeros((0, self.load_dim), dtype=np.float32)
 
 
 @PIPELINES.register_module()
@@ -249,7 +262,7 @@ class LoadAggregatedPoints(object):
             )
         else:
             raise ValueError(f'unknown format {self.load_format}')
-        
+
         total_time = perf_counter() - total_start
         if self.verbose:
             logger = get_logger('LoadAggregatedPoints')
