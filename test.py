@@ -23,6 +23,7 @@ def parse_args():
         description='MMDet test (and eval) a model')
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument('--results', help='input result file in pickle format')
     parser.add_argument('--out', help='output result file in pickle format')
     parser.add_argument(
         '--fuse-conv-bn',
@@ -118,8 +119,8 @@ def main():
     assert args.out or args.eval or args.format_only or args.show \
         or args.show_dir, \
         ('Please specify at least one operation (save/eval/format/show the '
-         'results / save the results) with the argument "--out", "--eval"'
-         ', "--format-only", "--show" or "--show-dir"')
+        'results / save the results) with the argument "--out", "--eval"'
+        ', "--format-only", "--show" or "--show-dir"')
 
     if args.eval and args.format_only:
         raise ValueError('--eval and --format_only cannot be both specified')
@@ -156,9 +157,9 @@ def main():
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids[0:1]
         warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`. '
-                      'Because we only support single GPU mode in '
-                      'non-distributed testing. Use the first GPU '
-                      'in `gpu_ids` now.')
+                    'Because we only support single GPU mode in '
+                    'non-distributed testing. Use the first GPU '
+                    'in `gpu_ids` now.')
     else:
         cfg.gpu_ids = [args.gpu_id]
 
@@ -175,45 +176,49 @@ def main():
 
     # build the dataloader
     dataset = build_dataset(cfg.data.test)
-    data_loader = build_dataloader(
-        dataset,
-        samples_per_gpu=samples_per_gpu,
-        workers_per_gpu=cfg.data.workers_per_gpu,
-        dist=distributed,
-        shuffle=False)
 
-    # build the model and load checkpoint
-    cfg.model.train_cfg = None
-    model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
-    fp16_cfg = cfg.get('fp16', None)
-    if fp16_cfg is not None:
-        wrap_fp16_model(model)
-    checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
-    if args.fuse_conv_bn:
-        model = fuse_conv_bn(model)
-    # old versions did not save class info in checkpoints, this walkaround is
-    # for backward compatibility
-    if 'CLASSES' in checkpoint.get('meta', {}):
-        model.CLASSES = checkpoint['meta']['CLASSES']
+    if args.results:
+        outputs = mmcv.load(args.results)
     else:
-        model.CLASSES = dataset.CLASSES
-    # palette for visualization in segmentation tasks
-    if 'PALETTE' in checkpoint.get('meta', {}):
-        model.PALETTE = checkpoint['meta']['PALETTE']
-    elif hasattr(dataset, 'PALETTE'):
-        # segmentation dataset has `PALETTE` attribute
-        model.PALETTE = dataset.PALETTE
+        data_loader = build_dataloader(
+            dataset,
+            samples_per_gpu=samples_per_gpu,
+            workers_per_gpu=cfg.data.workers_per_gpu,
+            dist=distributed,
+            shuffle=False)
 
-    if not distributed:
-        model = MMDataParallel(model, device_ids=cfg.gpu_ids)
-        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
-    else:
-        model = MMDistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False)
-        outputs = multi_gpu_test(model, data_loader, args.tmpdir,
-                                 args.gpu_collect)
+        # build the model and load checkpoint
+        cfg.model.train_cfg = None
+        model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
+        fp16_cfg = cfg.get('fp16', None)
+        if fp16_cfg is not None:
+            wrap_fp16_model(model)
+        checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
+        if args.fuse_conv_bn:
+            model = fuse_conv_bn(model)
+        # old versions did not save class info in checkpoints, this walkaround is
+        # for backward compatibility
+        if 'CLASSES' in checkpoint.get('meta', {}):
+            model.CLASSES = checkpoint['meta']['CLASSES']
+        else:
+            model.CLASSES = dataset.CLASSES
+        # palette for visualization in segmentation tasks
+        if 'PALETTE' in checkpoint.get('meta', {}):
+            model.PALETTE = checkpoint['meta']['PALETTE']
+        elif hasattr(dataset, 'PALETTE'):
+            # segmentation dataset has `PALETTE` attribute
+            model.PALETTE = dataset.PALETTE
+
+        if not distributed:
+            model = MMDataParallel(model, device_ids=cfg.gpu_ids)
+            outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
+        else:
+            model = MMDistributedDataParallel(
+                model.cuda(),
+                device_ids=[torch.cuda.current_device()],
+                broadcast_buffers=False)
+            outputs = multi_gpu_test(model, data_loader, args.tmpdir,
+                                    args.gpu_collect)
 
     rank, _ = get_dist_info()
     if rank == 0:

@@ -6,6 +6,7 @@ class_names = [
     'car', 'truck', 'trailer', 'bus', 'construction_vehicle', 'motorcycle',
     'pedestrian', 'bicycle'
 ]
+da_class_names = ['car', 'pedestrian', 'bicycle']
 label_map = [0, 0, 0, 0, 0, 0, 1, 2]
 dataset_type = 'NuScenesDataset'
 data_root = 'data/nuscenes/'
@@ -90,7 +91,7 @@ train_pipeline = [
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='PointShuffle'),
     dict(type='RemapLabels', label_map=label_map),
-    dict(type='DefaultFormatBundle3D', class_names=class_names),
+    dict(type='DefaultFormatBundle3D', class_names=da_class_names),
     dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d'])
 ]
 test_pipeline = [
@@ -123,7 +124,7 @@ test_pipeline = [
                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(
                 type='DefaultFormatBundle3D',
-                class_names=class_names,
+                class_names=da_class_names,
                 with_label=False),
             dict(type='Collect3D', keys=['points'])
         ])
@@ -146,7 +147,7 @@ eval_pipeline = [
         remove_close=True),
     dict(
         type='DefaultFormatBundle3D',
-        class_names=class_names,
+        class_names=da_class_names,
         with_label=False),
     dict(type='Collect3D', keys=['points'])
 ]
@@ -171,18 +172,18 @@ data = dict(
     val=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + 'nuscenes_infos_val.pkl',
+        ann_file=data_root + 'nuscenes_infos_val_da.pkl',
         pipeline=test_pipeline,
-        classes=class_names,
+        classes=da_class_names,
         modality=input_modality,
         test_mode=True,
         box_type_3d='LiDAR'),
     test=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + 'nuscenes_infos_val.pkl',
+        ann_file=data_root + 'nuscenes_infos_val_da.pkl',
         pipeline=test_pipeline,
-        classes=class_names,
+        classes=da_class_names,
         modality=input_modality,
         test_mode=True,
         box_type_3d='LiDAR'))

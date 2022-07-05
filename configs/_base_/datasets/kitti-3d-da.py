@@ -2,6 +2,7 @@
 dataset_type = 'KittiDataset'
 data_root = 'data/kitti/'
 class_names = ['Car', 'Truck', 'Van', 'Pedestrian', 'Person_sitting', 'Cyclist']
+da_class_names = ['Car', 'Pedestrian', 'Cyclist']
 label_map = [0, 0, 0, 1, 1, 2]
 point_cloud_range = [-75, -75, -5, 75, 75, 4]
 input_modality = dict(use_lidar=True, use_camera=False)
@@ -50,7 +51,7 @@ train_pipeline = [
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='PointShuffle'),
     dict(type='RemapLabels', label_map=label_map),
-    dict(type='DefaultFormatBundle3D', class_names=class_names),
+    dict(type='DefaultFormatBundle3D', class_names=da_class_names),
     dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d'])
 ]
 test_pipeline = [
@@ -76,7 +77,7 @@ test_pipeline = [
                 type='PointsRangeFilter', point_cloud_range=point_cloud_range),
             dict(
                 type='DefaultFormatBundle3D',
-                class_names=class_names,
+                class_names=da_class_names,
                 with_label=False),
             dict(type='Collect3D', keys=['points'])
         ])
@@ -92,7 +93,7 @@ eval_pipeline = [
         file_client_args=file_client_args),
     dict(
         type='DefaultFormatBundle3D',
-        class_names=class_names,
+        class_names=da_class_names,
         with_label=False),
     dict(type='Collect3D', keys=['points'])
 ]
@@ -119,23 +120,23 @@ data = dict(
     val=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + 'kitti_infos_val.pkl',
+        ann_file=data_root + 'kitti_infos_val_da.pkl',
         split='training',
         pts_prefix='velodyne_reduced',
         pipeline=test_pipeline,
         modality=input_modality,
-        classes=class_names,
+        classes=da_class_names,
         test_mode=True,
         box_type_3d='LiDAR'),
     test=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root + 'kitti_infos_val.pkl',
+        ann_file=data_root + 'kitti_infos_val_da.pkl',
         split='training',
         pts_prefix='velodyne_reduced',
         pipeline=test_pipeline,
         modality=input_modality,
-        classes=class_names,
+        classes=da_class_names,
         test_mode=True,
         box_type_3d='LiDAR'))
 
