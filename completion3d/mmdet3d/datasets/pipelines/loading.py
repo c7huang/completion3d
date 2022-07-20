@@ -12,8 +12,8 @@ from mmcv.utils import get_logger
 from mmdet.datasets.builder import PIPELINES
 from mmdet3d.core import LiDARInstance3DBoxes, LiDARPoints
 from mmdet3d.datasets.pipelines import LoadPointsFromFile
-from ...aggregation.common import load_aggregated_points
-from ...utils.transforms import affine_transform
+from ....aggregation.common import load_aggregated_points
+from ....utils.transforms import affine_transform
 
 
 @PIPELINES.register_module()

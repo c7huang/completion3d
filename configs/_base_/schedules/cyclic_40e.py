@@ -3,7 +3,7 @@
 # The learning rate set in the cyclic schedule is the initial learning rate
 # rather than the max learning rate. Since the target_ratio is (10, 1e-4),
 # the learning rate will change from 0.0018 to 0.018, than go to 0.0018*1e-4
-lr = 0.003
+lr = 0.0018
 # The optimizer follows the setting in SECOND.Pytorch, but here we use
 # the offcial AdamW optimizer implemented by PyTorch.
 optimizer = dict(type='AdamW', lr=lr, betas=(0.95, 0.99), weight_decay=0.01)
@@ -28,4 +28,4 @@ momentum_config = dict(
 # Although the max_epochs is 40, this schedule is usually used we
 # RepeatDataset with repeat ratio N, thus the actual max epoch
 # number could be Nx40
-runner = dict(type='EpochBasedRunner', max_epochs=80)
+runner = dict(type='EpochBasedRunner', max_epochs=40)
