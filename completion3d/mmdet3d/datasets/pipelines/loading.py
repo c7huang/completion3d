@@ -188,7 +188,7 @@ class LoadAggregatedPoints(object):
                     # Record augmentation
                     aug_transformation = aug_transformation @ \
                         affine_transform(
-                            transformation=pcd_rotation
+                            matrix=pcd_rotation
                         )
                 elif t == 'S':
                     pcd_scale_factor = input_dict['pcd_scale_factor']
@@ -197,7 +197,7 @@ class LoadAggregatedPoints(object):
                     # Record augmentation
                     aug_transformation = aug_transformation @ \
                         affine_transform(
-                            transformation=np.identity(3)*pcd_scale_factor
+                            matrix=np.identity(3)*pcd_scale_factor
                         )
                 elif t == 'T':
                     pcd_trans = input_dict['pcd_trans']
