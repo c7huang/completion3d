@@ -21,16 +21,16 @@ if __name__ == '__main__':
         author_email = 'c.huang@uwaterloo.ca',
         url = 'https://github.com/c7huang/completion3d',
         packages = find_packages(),
-        ext_modules = [
-            Extension(
-                name = 'completion3d.simulation.ray_casting',
-                include_dirs = [NUMPY_INCLUDE_DIR],
-                extra_compile_args = ['-fopenmp'],
-                undef_macros = ['RC_WITHOUT_TRIANGLE', 'RC_WITHOUT_SPHERE'],
-                sources = [
-                    'completion3d/simulation/ray_casting/ray_casting.cpp',
-                    'completion3d/simulation/ray_casting/pymodule.cpp'
-                ]
-            )
-        ]
+        # ext_modules = [
+        #     Extension(
+        #         name = 'completion3d.simulation.ray_casting',
+        #         include_dirs = [NUMPY_INCLUDE_DIR],
+        #         extra_compile_args = ['-fopenmp'],
+        #         undef_macros = ['RC_WITHOUT_TRIANGLE', 'RC_WITHOUT_SPHERE'],
+        #         sources = [
+        #             'completion3d/simulation/ray_casting/ray_casting.cpp',
+        #             'completion3d/simulation/ray_casting/pymodule.cpp'
+        #         ]
+        #     )
+        # ]
     )
